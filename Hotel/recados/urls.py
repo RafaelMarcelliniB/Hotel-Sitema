@@ -1,9 +1,11 @@
 from django.urls import path
 
-from recados.views import HealthRecadosView, RecadoListView
+from recados.views import HealthRecadosView, RecadoViewSet
 
 urlpatterns = [
-	path('', RecadoListView.as_view(), name='recados-list'),
+	path('', RecadoViewSet.as_view({'get': 'list', 'post': 'create'}), name='recados-list'),
+	path('<int:pk>/', RecadoViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='recados-detail'),
+	path('<int:pk>/leer/', RecadoViewSet.as_view({'patch': 'marcar_leido'}), name='recados-leer'),
 	path('health/', HealthRecadosView.as_view(), name='recados-health'),
 ]
 

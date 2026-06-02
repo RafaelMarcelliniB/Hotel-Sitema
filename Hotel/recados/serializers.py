@@ -6,6 +6,11 @@ class RecadoSerializer(BaseSerializer):
     class Meta:
         model = Recado
         fields = '__all__'
+        extra_kwargs = {
+			'trabajador_origen': {'read_only': True},
+			'fecha': {'read_only': True},
+			'leido': {'read_only': True},
+		}
 
 # ════════════════════════════════════════
 # SOLID APLICADO EN ESTE ARCHIVO:

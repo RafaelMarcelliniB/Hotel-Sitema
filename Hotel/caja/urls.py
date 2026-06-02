@@ -1,9 +1,23 @@
 from django.urls import path
 
-from caja.views import CajaListView, HealthCajaView
+from caja.views import (
+	CajaAperturaView,
+	CajaCierreView,
+	CajaListView,
+	CajaResumenView,
+	HealthCajaView,
+	MovimientoCajaPagarDeudaView,
+	MovimientoCajaViewSet,
+)
 
 urlpatterns = [
 	path('cajas/', CajaListView.as_view(), name='cajas-list'),
+	path('apertura/', CajaAperturaView.as_view(), name='caja-apertura'),
+	path('cierre/', CajaCierreView.as_view(), name='caja-cierre'),
+	path('resumen/', CajaResumenView.as_view(), name='caja-resumen'),
+	path('movimientos/', MovimientoCajaViewSet.as_view({'get': 'list', 'post': 'create'}), name='movimientos-list'),
+	path('movimientos/<int:pk>/', MovimientoCajaViewSet.as_view({'get': 'retrieve', 'delete': 'destroy'}), name='movimientos-detail'),
+	path('movimientos/<int:movimiento_id>/pagar-deuda/', MovimientoCajaPagarDeudaView.as_view(), name='movimientos-pagar-deuda'),
 	path('health/', HealthCajaView.as_view(), name='caja-health'),
 ]
 

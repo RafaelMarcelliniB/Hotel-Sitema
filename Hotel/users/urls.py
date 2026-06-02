@@ -1,8 +1,15 @@
-from django.urls import path
+from django.urls import include, path
+from rest_framework.routers import DefaultRouter
 
-from users.views import CurrentUserView, HealthUsersView, LoginView
+from users.views import AuditLogViewSet, CurrentUserView, HealthUsersView, LoginView, TrabajadorViewSet
+
+
+router = DefaultRouter()
+router.register(r'trabajadores', TrabajadorViewSet, basename='trabajadores')
+router.register(r'audit-logs', AuditLogViewSet, basename='audit-logs')
 
 urlpatterns = [
+	path('', include(router.urls)),
 	path('auth/login/', LoginView.as_view(), name='auth-login'),
 	path('auth/me/', CurrentUserView.as_view(), name='auth-me'),
 	path('health/', HealthUsersView.as_view(), name='users-health'),
