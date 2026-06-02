@@ -1,9 +1,21 @@
 from django.urls import path
 
-from cochera.views import EspacioCocheraListView, HealthCocheraView
+from cochera.views import (
+	EspacioCocheraDisponiblesView,
+	EspacioCocheraViewSet,
+	HealthCocheraView,
+	RegistroVehiculoHistorialView,
+	RegistroVehiculoIngresoView,
+	RegistroVehiculoSalidaView,
+)
 
 urlpatterns = [
-	path('espacios/', EspacioCocheraListView.as_view(), name='espacios-list'),
+	path('espacios/', EspacioCocheraViewSet.as_view({'get': 'list', 'post': 'create'}), name='espacios-list'),
+	path('espacios/<int:pk>/', EspacioCocheraViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='espacios-detail'),
+	path('espacios/disponibles/', EspacioCocheraDisponiblesView.as_view(), name='espacios-disponibles'),
+	path('vehiculos/ingreso/', RegistroVehiculoIngresoView.as_view(), name='vehiculos-ingreso'),
+	path('vehiculos/<int:registro_id>/salida/', RegistroVehiculoSalidaView.as_view(), name='vehiculos-salida'),
+	path('registros/', RegistroVehiculoHistorialView.as_view(), name='registros-historial'),
 	path('health/', HealthCocheraView.as_view(), name='cochera-health'),
 ]
 

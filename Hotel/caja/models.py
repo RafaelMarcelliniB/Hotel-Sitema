@@ -54,6 +54,7 @@ class MovimientoCaja(BaseModel):
 	referencia = models.CharField(max_length=150, blank=True)
 	monto = models.DecimalField(max_digits=10, decimal_places=2)
 	descripcion = models.TextField(blank=True)
+	pagada = models.BooleanField(default=False)
 	fecha_hora = models.DateTimeField(auto_now_add=True)
 
 	def __str__(self) -> str:

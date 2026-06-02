@@ -1,5 +1,7 @@
 from django.db import transaction
+
 from core.base_services import BaseService
+from hotel.models import CheckIn
 from market.repositories import DetalleVentaRepository, IngresoMercaderiaRepository, ProductoRepository, VentaMarketRepository
 
 
@@ -9,6 +11,21 @@ class ProductoService(BaseService):
 
 class IngresoMercaderiaService(BaseService):
     repository_class = IngresoMercaderiaRepository
+
+    @transaction.atomic
+    def registrar_ingreso(self, ingreso_data, trabajador):
+        producto_repo = ProductoRepository()
+        producto = producto_repo.get_by_id(ingreso_data['producto_id'])
+        ingreso = self.repository.create(
+            producto=producto,
+            cantidad=ingreso_data['cantidad'],
+            precio_compra=ingreso_data['precio_compra'],
+            proveedor=ingreso_data['proveedor'],
+            fecha=ingreso_data.get('fecha'),
+            trabajador=trabajador,
+        )
+        producto_repo.update(producto.id, stock_actual=producto.stock_actual + ingreso_data['cantidad'])
+        return ingreso
 
 
 class VentaMarketService(BaseService):
@@ -20,7 +37,14 @@ class VentaMarketService(BaseService):
         self.detalle_repo = DetalleVentaRepository()
 
     @transaction.atomic
-    def registrar_venta_con_stock(self, venta_data, detalles_data):
+    def registrar_venta_con_stock(self, venta_data, detalles_data, trabajador):
+        checkin_vinculado_id = venta_data.pop('checkin_vinculado_id', None)
+        if checkin_vinculado_id:
+            venta_data['checkin_vinculado'] = CheckIn.objects.get(pk=checkin_vinculado_id)
+
+        venta_data['trabajador'] = trabajador
+        venta_data.setdefault('fecha', venta_data.get('fecha'))
+        venta_data.setdefault('hora', venta_data.get('hora'))
         
         #Crear la venta principal
         venta = self.repository.create(**venta_data)

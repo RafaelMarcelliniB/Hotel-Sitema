@@ -1,13 +1,74 @@
+from django.db import transaction
+from django.db.models import Sum
+from django.utils import timezone
+
 from core.base_services import BaseService
+from caja.models import Caja, MovimientoCaja
 from caja.repositories import CajaRepository, MovimientoCajaRepository
 
 
 class CajaService(BaseService):
     repository_class = CajaRepository
 
+    @transaction.atomic
+    def abrir_caja(self, datos, trabajador):
+        turno = datos['turno']
+        if self.repository.model.objects.filter(estado=Caja.Estado.ABIERTA, turno=turno).exists():
+            raise ValueError('Ya existe una caja abierta para este turno.')
+        return self.repository.create(
+            trabajador=trabajador,
+            turno=turno,
+            fecha_apertura=timezone.localdate(),
+            hora_apertura=timezone.localtime().time(),
+            monto_inicial=datos['monto_inicial'],
+            estado=Caja.Estado.ABIERTA,
+        )
+
+    @transaction.atomic
+    def cerrar_caja(self, caja):
+        ingresos = caja.movimientos.filter(tipo=MovimientoCaja.Tipo.INGRESO).aggregate(total=Sum('monto')).get('total') or 0
+        egresos = caja.movimientos.filter(tipo=MovimientoCaja.Tipo.EGRESO).aggregate(total=Sum('monto')).get('total') or 0
+        monto_final = caja.monto_inicial + ingresos - egresos
+        return self.repository.update(
+            caja.id,
+            fecha_cierre=timezone.localdate(),
+            hora_cierre=timezone.localtime().time(),
+            monto_final=monto_final,
+            estado=Caja.Estado.CERRADA,
+        )
+
+    def obtener_resumen(self, caja):
+        movimientos = caja.movimientos.all()
+        total_efectivo = movimientos.filter(tipo_caja=MovimientoCaja.TipoCaja.EFECTIVO, pagada=False).aggregate(total=Sum('monto')).get('total') or 0
+        total_yape = movimientos.filter(tipo_caja=MovimientoCaja.TipoCaja.YAPE, pagada=False).aggregate(total=Sum('monto')).get('total') or 0
+        total_tarjeta = movimientos.filter(tipo_caja=MovimientoCaja.TipoCaja.TARJETA, pagada=False).aggregate(total=Sum('monto')).get('total') or 0
+        total_ingresos = movimientos.filter(tipo=MovimientoCaja.Tipo.INGRESO).aggregate(total=Sum('monto')).get('total') or 0
+        total_egresos = movimientos.filter(tipo=MovimientoCaja.Tipo.EGRESO).aggregate(total=Sum('monto')).get('total') or 0
+        deudas = movimientos.filter(tipo=MovimientoCaja.Tipo.DEUDA, pagada=False)
+        return {
+            'monto_inicial': caja.monto_inicial,
+            'total_efectivo': total_efectivo,
+            'total_yape': total_yape,
+            'total_tarjeta': total_tarjeta,
+            'total_ingresos': total_ingresos,
+            'total_egresos': total_egresos,
+            'deudas_pendientes': deudas,
+            'movimientos': movimientos,
+        }
+
 
 class MovimientoCajaService(BaseService):
     repository_class = MovimientoCajaRepository
+
+    @transaction.atomic
+    def agregar_movimiento(self, datos, caja):
+        return self.repository.create(caja=caja, **datos)
+
+    @transaction.atomic
+    def pagar_deuda(self, movimiento):
+        movimiento.pagada = True
+        movimiento.save(update_fields=['pagada'])
+        return movimiento
 
 # ════════════════════════════════════════
 # SOLID APLICADO EN ESTE ARCHIVO:
