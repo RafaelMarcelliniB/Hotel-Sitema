@@ -1,24 +1,40 @@
-import Card from '../components/ui/Card'
-import Table from '../components/ui/Table'
+import { useState } from 'react'
 import { useHabitaciones } from '../hooks/useHabitaciones'
+import HabitacionCard from '../components/hotel/HabitacionCard'
+import ModalCheckIn from '../components/hotel/ModalCheckIn'
+import Spinner from '../components/ui/Spinner'
 
 export default function Hotel() {
-  const { data = [] } = useHabitaciones()
+  const { habitaciones, isLoading, refetch } = useHabitaciones()
+  const [selectedHab, setSelectedHab] = useState(null)
+  const [showCheckIn, setShowCheckIn] = useState(false)
+
+  if (isLoading) return <Spinner />
 
   return (
-    <Card>
-      <h3 className="mb-4 text-lg font-semibold">Habitaciones</h3>
-      <Table columns={['Número', 'Tipo', 'Ocupación', 'Limpieza', 'Tarifa']}>
-        {data.map((habitacion) => (
-          <tr key={habitacion.id}>
-            <td className="px-4 py-3">{habitacion.numero}</td>
-            <td className="px-4 py-3">{habitacion.tipo}</td>
-            <td className="px-4 py-3">{habitacion.estado_ocupacion}</td>
-            <td className="px-4 py-3">{habitacion.estado_limpieza}</td>
-            <td className="px-4 py-3">S/ {habitacion.tarifa_dia}</td>
-          </tr>
+    <div className="p-6">
+      <h2 className="text-2xl font-bold mb-6">Mapa de Habitaciones</h2>
+      
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        {habitaciones.map(hab => (
+          <HabitacionCard 
+            key={hab.id} 
+            habitacion={hab} 
+            onClick={(h) => {
+              setSelectedHab(h)
+              if(h.estado_ocupacion === 'disponible') setShowCheckIn(true)
+            }} 
+          />
         ))}
-      </Table>
-    </Card>
+      </div>
+
+      {showCheckIn && selectedHab && (
+        <ModalCheckIn 
+          habitacion={selectedHab} 
+          onClose={() => setShowCheckIn(false)}
+          onSuccess={refetch}
+        />
+      )}
+    </div>
   )
 }

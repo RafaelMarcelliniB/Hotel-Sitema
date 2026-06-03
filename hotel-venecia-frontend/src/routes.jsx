@@ -25,11 +25,30 @@ export const router = createBrowserRouter([
     ),
     children: [
       { index: true, element: <Dashboard /> },
-      { path: 'hotel', element: <Hotel /> },
-      { path: 'market', element: <Market /> },
-      { path: 'cochera', element: <Cochera /> },
-      { path: 'caja', element: <Caja /> },
-      { path: 'recados', element: <Recados /> },
+      { 
+        path: 'hotel', 
+        element: <ProtectedRoute allowedRoles={['admin', 'recepcionista']}><Hotel /></ProtectedRoute> 
+      },
+      { 
+        path: 'market', 
+        element: <ProtectedRoute allowedRoles={['admin', 'recepcionista', 'cajero']}><Market /></ProtectedRoute> 
+      },
+      { 
+        path: 'cochera', 
+        element: <ProtectedRoute allowedRoles={['admin', 'recepcionista', 'cajero']}><Cochera /></ProtectedRoute> 
+      },
+      { 
+        path: 'caja', 
+        element: <ProtectedRoute allowedRoles={['admin', 'cajero']}><Caja /></ProtectedRoute> 
+      },
+      { 
+        path: 'recados', 
+        element: <Recados /> // Acceso general para todos los trabajadores
+      },
+      { 
+        path: 'trabajadores', 
+        element: <ProtectedRoute allowedRoles={['admin']}><div>Página Trabajadores</div></ProtectedRoute> 
+      },
     ],
   },
   {

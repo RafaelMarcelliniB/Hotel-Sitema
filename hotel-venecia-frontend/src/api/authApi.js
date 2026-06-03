@@ -9,3 +9,19 @@ export async function login({ username, password }) {
     throw new Error(detail)
   }
 }
+
+// Nuevas funciones para el CRUD de trabajadores
+export async function getTrabajadores() {
+  const { data } = await api.get('/users/trabajadores/')
+  return data
+}
+
+export async function registrarTrabajador(userData) {
+  const { data } = await api.post('/users/trabajadores/', userData)
+  return data
+}
+
+export async function actualizarTrabajador(id, userData) {
+  const { data } = await api.patch(`/users/trabajadores/${id}/`, userData)
+  return data
+}

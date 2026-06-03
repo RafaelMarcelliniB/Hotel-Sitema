@@ -1,4 +1,4 @@
-export default function Alert({ variant = 'neutral', className = '', children }) {
+export function Alert({ variant = 'neutral', className = '', children }) {
   const variants = {
     neutral: 'bg-slate-100 text-slate-700',
     success: 'bg-success/10 text-success',
@@ -8,3 +8,5 @@ export default function Alert({ variant = 'neutral', className = '', children })
 
   return <div className={`rounded-xl px-4 py-3 text-sm ${variants[variant] || variants.neutral} ${className}`}>{children}</div>
 }
+
+export default Alert;

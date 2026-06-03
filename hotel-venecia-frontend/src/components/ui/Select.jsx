@@ -1,6 +1,6 @@
 import { forwardRef } from 'react'
 
-const Select = forwardRef(function Select({ className = '', children, ...props }, ref) {
+export const Select = forwardRef(function Select({ className = '', children, ...props }, ref) {
   return (
     <select
       ref={ref}

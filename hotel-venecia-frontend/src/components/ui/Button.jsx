@@ -1,4 +1,4 @@
-export default function Button({ as: Component = 'button', variant = 'primary', className = '', ...props }) {
+export function Button({ as: Component = 'button', variant = 'primary', className = '', ...props }) {
   const variants = {
     primary: 'bg-primary text-white hover:bg-indigo-900',
     secondary: 'bg-secondary text-slate-900 hover:bg-yellow-500',
@@ -13,3 +13,5 @@ export default function Button({ as: Component = 'button', variant = 'primary', 
     />
   )
 }
+
+export default Button;

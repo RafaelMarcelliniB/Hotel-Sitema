@@ -1,4 +1,4 @@
-export default function Badge({ variant = 'neutral', className = '', children }) {
+export  function Badge({ variant = 'neutral', className = '', children }) {
   const variants = {
     neutral: 'bg-neutral/15 text-slate-700',
     success: 'bg-success/15 text-success',
@@ -9,3 +9,5 @@ export default function Badge({ variant = 'neutral', className = '', children })
 
   return <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${variants[variant] || variants.neutral} ${className}`}>{children}</span>
 }
+
+export default Badge;
