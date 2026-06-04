@@ -16,8 +16,14 @@ from caja.serializers import (
 from caja.services import CajaService, MovimientoCajaService
 
 
-def _caja_activa():
-    return Caja.objects.filter(estado=Caja.Estado.ABIERTA).order_by('-fecha_apertura', '-hora_apertura').first()
+def _caja_activa(user):
+    # Intentamos ser lo más flexibles posible
+    return Caja.objects.filter(
+        trabajador=user, 
+        estado__iexact='ABIERTA' # 'iexact' ignora si es mayúscula o minúscula
+    ).order_by('-fecha_apertura', '-hora_apertura').first()
+    
+
 
 
 def _serializar_resumen(caja):
@@ -61,11 +67,14 @@ class CajaCierreView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        caja = _caja_activa()
+        caja = _caja_activa(request.user) 
+        
         if not caja:
-            return Response({'detail': 'No existe una caja abierta.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': 'No existe una caja abierta para este usuario.'}, status=status.HTTP_400_BAD_REQUEST)
+        
         serializer = CajaCierreSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        
         caja_cerrada = CajaService().cerrar_caja(caja)
         return Response(CajaSerializer(caja_cerrada).data)
 
@@ -74,11 +83,23 @@ class CajaResumenView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        caja = _caja_activa()
-        if not caja:
-            return Response({'detail': 'No existe una caja abierta.'}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(_serializar_resumen(caja))
-
+        try:
+            caja = _caja_activa(request.user)
+            
+            if not caja:
+                # El 404 es correcto para que React sepa que no hay caja
+                return Response(
+                    {'detail': 'Sin caja activa'}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Si hay caja, intentamos serializar
+            datos = _serializar_resumen(caja)
+            return Response(datos)
+            
+        except Exception as e:
+            # Si algo falla en la lógica, que nos diga qué es
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class MovimientoCajaViewSet(viewsets.ModelViewSet):
     queryset = MovimientoCaja.objects.select_related('caja').order_by('-fecha_hora')

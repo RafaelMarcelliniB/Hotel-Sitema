@@ -215,9 +215,43 @@ class CheckInCreateView(APIView):
     def post(self, request):
         serializer = CheckInCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        checkin = CheckInService().iniciar_alquiler(serializer.validated_data, request.user)
-        return Response(_serializar_detalle_checkin(checkin), status=status.HTTP_201_CREATED)
+        
+        # 1. Buscamos la caja que esté abierta actualmente en el sistema
+        from caja.models import Caja, MovimientoCaja
 
+        caja_activa = Caja.objects.filter(
+            estado__iexact='ABIERTA'
+        ).order_by('-fecha_apertura', '-hora_apertura').first() # Trae la última abierta
+
+        if not caja_activa:
+            return Response(
+                {'error': 'No se puede realizar el check-in porque no hay ninguna caja abierta.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not caja_activa:
+            return Response(
+                {'error': 'No tienes una caja abierta. Por favor, abre caja antes de hacer Check-in.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 2. Registramos el Check-in
+        checkin = CheckInService().iniciar_alquiler(serializer.validated_data, request.user)
+
+        # 3. Registramos el movimiento de DINERO en la caja
+        monto = Decimal(str(request.data.get('monto_pagado', 0)))
+        if monto > 0:
+            MovimientoCaja.objects.create(
+                caja=caja_activa,
+                tipo=MovimientoCaja.Tipo.INGRESO,
+                tipo_caja=request.data.get('tipo_pago', 'EFECTIVO'),
+                modulo=MovimientoCaja.Modulo.HOTEL,
+                referencia=f'Check-in #{checkin.id}',
+                monto=monto,
+                descripcion=f'Pago ingreso hab. {checkin.habitacion.numero} - Huésped: {checkin.huesped.nombre}',
+            )
+
+        return Response(_serializar_detalle_checkin(checkin), status=status.HTTP_201_CREATED)
 
 class CheckInActiveListView(APIView):
     permission_classes = [IsAuthenticated]

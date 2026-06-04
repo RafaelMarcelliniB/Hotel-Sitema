@@ -2,13 +2,15 @@ import { useState } from 'react'
 import Badge from '../ui/Badge'
 import Button from '../ui/Button'
 import { useAuthStore } from '../../store/authStore'
-import { useCajaStore } from '../../store/cajaStore'
+import { useCajas } from '../../hooks/useCajas'
 import { useRecados } from '../../hooks/useRecados'
 
 export default function TopBar() {
   const user = useAuthStore((state) => state.user)
   const clearSession = useAuthStore((state) => state.clearSession)
-  const cajaActiva = useCajaStore((state) => state.cajaActiva)
+  
+  const { useResumen } = useCajas()
+  const { data: resumen } = useResumen()
   
   // Consumimos los recados en tiempo real
   const { recados, marcarLeido } = useRecados()
@@ -16,6 +18,9 @@ export default function TopBar() {
 
   // Filtramos recados no leídos que requieran atención (Media o Alta prioridad)
   const notificaciones = recados.filter(r => !r.leido && r.prioridad !== 'BAJA')
+
+  // Verificamos si existe una caja activa en la respuesta del servidor
+  const cajaActivaReal = resumen && resumen.caja
 
   return (
     <header className="flex items-center justify-between gap-4 border-b border-slate-200 bg-white px-6 py-4 sticky top-0 z-40">
@@ -33,12 +38,10 @@ export default function TopBar() {
             onClick={() => setShowNotifications(!showNotifications)}
             className="p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors relative"
           >
-            {/* Icono de Campana SVG */}
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
             </svg>
             
-            {/* Globo de Alerta Animado */}
             {notificaciones.length > 0 && (
               <span className="absolute top-1 right-1 flex h-4 w-4">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
@@ -49,7 +52,6 @@ export default function TopBar() {
             )}
           </button>
 
-          {/* Menú Flotante de Notificaciones */}
           {showNotifications && (
             <div className="absolute right-0 mt-2 w-80 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden z-50">
               <div className="p-3 border-b bg-slate-50 font-semibold text-sm text-slate-700">
@@ -90,19 +92,26 @@ export default function TopBar() {
           )}
         </div>
 
-        {/* Divisor Visual */}
         <div className="h-6 w-[1px] bg-slate-200"></div>
 
-        {/* Bloque de Estados Original */}
+        {/* Bloque de Estados ACTUALIZADO */}
         <div className="flex items-center gap-3">
-          {cajaActiva ? (
-            <Badge variant="success">Caja activa: {cajaActiva.turno}</Badge>
+          {cajaActivaReal ? (
+            <Badge variant="success" className="animate-fade-in flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse"></span>
+              Caja activa: {cajaActivaReal.turno}
+            </Badge>
           ) : (
             <Badge variant="warning">Sin caja activa</Badge>
           )}
-          <Badge variant="neutral">{user?.rol ?? 'sin rol'}</Badge>
+          
+          <Badge variant="neutral" className="uppercase tracking-wider">
+            {user?.rol ?? 'sin rol'}
+          </Badge>
+          
           <Button 
             variant="ghost" 
+            size="sm"
             onClick={() => {
               if (confirm("¿Estás seguro de que deseas salir del sistema?")) {
                 clearSession()

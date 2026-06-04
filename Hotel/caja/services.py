@@ -28,7 +28,9 @@ class CajaService(BaseService):
     def cerrar_caja(self, caja):
         ingresos = caja.movimientos.filter(tipo=MovimientoCaja.Tipo.INGRESO).aggregate(total=Sum('monto')).get('total') or 0
         egresos = caja.movimientos.filter(tipo=MovimientoCaja.Tipo.EGRESO).aggregate(total=Sum('monto')).get('total') or 0
-        monto_final = caja.monto_inicial + ingresos - egresos
+        
+        monto_final = float(caja.monto_inicial) + float(ingresos) - float(egresos)
+        
         return self.repository.update(
             caja.id,
             fecha_cierre=timezone.localdate(),

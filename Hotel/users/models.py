@@ -1,31 +1,35 @@
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
-
 from core.base_models import BaseModel
 
-
 class Trabajador(BaseModel, AbstractUser):
-	class Rol(models.TextChoices):
-		ADMIN = 'admin', 'Admin'
-		RECEPCIONISTA = 'recepcionista', 'Recepcionista'
-		CAJERO = 'cajero', 'Cajero'
+    class Rol(models.TextChoices):
+        ADMIN = 'admin', 'Admin'
+        RECEPCIONISTA = 'recepcionista', 'Recepcionista'
+        CAJERO = 'cajero', 'Cajero'
 
-	class Turno(models.TextChoices):
-		MANANA = 'mañana', 'Mañana'
-		TARDE = 'tarde', 'Tarde'
-		NOCHE = 'noche', 'Noche'
-		MADRUGADA = 'madrugada', 'Madrugada'
+    class Turno(models.TextChoices):
+        MANANA = 'mañana', 'Mañana'
+        TARDE = 'tarde', 'Tarde'
+        NOCHE = 'noche', 'Noche'
+        MADRUGADA = 'madrugada', 'Madrugada'
 
-	nombre = models.CharField(max_length=100)
-	apellido = models.CharField(max_length=100)
-	rol = models.CharField(max_length=20, choices=Rol.choices, default=Rol.RECEPCIONISTA)
-	turno = models.CharField(max_length=20, choices=Turno.choices, default=Turno.MANANA)
-	activo = models.BooleanField(default=True)
-	REQUIRED_FIELDS = ['nombre', 'apellido']
+    nombre = models.CharField(max_length=100)
+    apellido = models.CharField(max_length=100)
+    rol = models.CharField(max_length=20, choices=Rol.choices, default=Rol.RECEPCIONISTA)
+    turno = models.CharField(max_length=20, choices=Turno.choices, default=Turno.MANANA)
+    activo = models.BooleanField(default=True)
+    REQUIRED_FIELDS = ['nombre', 'apellido']
 
-	def __str__(self) -> str:
-		return f'{self.nombre} {self.apellido}'
+    def save(self, *args, **kwargs):
+        # Lógica automática: Si es superusuario, su rol DEBE ser admin
+        if self.is_superuser:
+            self.rol = self.Rol.ADMIN
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f'{self.nombre} {self.apellido}'
 
 
 class AuditLog(BaseModel):

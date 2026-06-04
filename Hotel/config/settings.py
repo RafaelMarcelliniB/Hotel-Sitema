@@ -50,9 +50,10 @@ INSTALLED_APPS = [
     'users',
     'hotel',
     'market',
-    'cochera',
     'caja',
+    'cochera',
     'recados',
+    'core',
 ]
 
 MIDDLEWARE = [
