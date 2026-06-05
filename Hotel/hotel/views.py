@@ -227,42 +227,102 @@ class CheckInCreateView(APIView):
         serializer = CheckInCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
-        # 1. Buscamos la caja que esté abierta actualmente en el sistema
-        from caja.models import Caja, MovimientoCaja
-
         caja_activa = Caja.objects.filter(
+            trabajador=request.user,
             estado__iexact='ABIERTA'
-        ).order_by('-fecha_apertura', '-hora_apertura').first() # Trae la última abierta
+        ).order_by('-fecha_apertura', '-hora_apertura').first()
 
         if not caja_activa:
             return Response(
-                {'error': 'No se puede realizar el check-in porque no hay ninguna caja abierta.'}, 
+                {'error': 'No se puede realizar el check-in porque no tienes una caja abierta.'}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        if not caja_activa:
-            return Response(
-                {'error': 'No tienes una caja abierta. Por favor, abre caja antes de hacer Check-in.'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # 2. Registramos el Check-in
+        # 1. Creamos el Check-In en la base de datos
         checkin = CheckInService().iniciar_alquiler(serializer.validated_data, request.user)
 
-        # 3. Registramos el movimiento de DINERO en la caja
-        monto = Decimal(str(request.data.get('monto_pagado', 0)))
-        if monto > 0:
+        # 2. Calculamos el valor total de la tarifa
+        tarifa = _tarifa_checkin(checkin)
+        descuento = _to_decimal(serializer.validated_data.get('descuento', 0))
+        total_habitacion = tarifa - descuento
+
+        # 3. Como no paga nada adelantado, va directo como DEUDA (pagada=False)
+        # Corregido: Usamos el string directo 'EFECTIVO' para evitar conflictos de enumeradores
+        MovimientoCaja.objects.create(
+            caja=caja_activa,
+            tipo=MovimientoCaja.Tipo.DEUDA,
+            tipo_caja='EFECTIVO',
+            modulo=MovimientoCaja.Modulo.HOTEL,
+            referencia=f'Check-in #{checkin.id}',
+            monto=total_habitacion,
+            descripcion=f'Costo de estadía pendiente hab. {checkin.habitacion.numero} - Huésped: {checkin.huesped.nombre}',
+            pagada=False  # Se suma inmediatamente a Pendientes de Pago
+        )
+
+        return Response(_serializar_detalle_checkin(checkin), status=status.HTTP_201_CREATED)
+
+
+class CheckOutCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, checkin_id):
+        checkin = CheckIn.objects.select_related('habitacion', 'huesped', 'trabajador').get(pk=checkin_id)
+        serializer = CheckOutCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        caja_activa = Caja.objects.filter(
+            estado__iexact='ABIERTA'
+        ).order_by('-fecha_apertura', '-hora_apertura').first()
+        
+        if not caja_activa:
+            return Response(
+                {'error': 'No se puede procesar la salida porque no existe ninguna caja abierta en el sistema.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        resumen = _calcular_resumen_checkin(checkin)
+        monto_pago_adelantado = _to_decimal(checkin.monto_pagado)
+        total_gral = resumen['total_general']
+        saldo_pendiente = max(total_gral - monto_pago_adelantado, Decimal('0'))
+
+        checkout_data = {
+            'subtotal_habitacion': resumen['subtotal_habitacion'],
+            'subtotal_adicionales': resumen['subtotal_adicionales'],
+            'subtotal_market': resumen['subtotal_market'],
+            'subtotal_cochera': resumen['subtotal_cochera'],
+            'total_general': total_gral,
+            'metodo_pago': serializer.validated_data['metodo_pago'],
+            'deuda_pendiente': saldo_pendiente,
+        }
+        
+        # 1. Finalizamos el alquiler mediante el servicio
+        checkout = CheckOutService().finalizar_alquiler(checkin_id, checkout_data, request.user)
+        
+        # 2. Si el huésped tenía saldo pendiente y lo está liquidando ahora:
+        if saldo_pendiente > 0:
+            metodo_pago_raw = checkout.metodo_pago.upper() if checkout.metodo_pago else 'EFECTIVO'
+            tipo_caja = metodo_pago_raw if metodo_pago_raw in ['EFECTIVO', 'YAPE', 'TARJETA'] else 'EFECTIVO'
+            
+            # A) Registramos el INGRESO real del dinero en la caja (pagada=True)
+            # Corregido: Se marca pagada=True para que afecte correctamente los Ingresos del Día
             MovimientoCaja.objects.create(
                 caja=caja_activa,
                 tipo=MovimientoCaja.Tipo.INGRESO,
-                tipo_caja=request.data.get('tipo_pago', 'EFECTIVO'),
+                tipo_caja=tipo_caja,
                 modulo=MovimientoCaja.Modulo.HOTEL,
-                referencia=f'Check-in #{checkin.id}',
-                monto=monto,
-                descripcion=f'Pago ingreso hab. {checkin.habitacion.numero} - Huésped: {checkin.huesped.nombre}',
+                referencia=f'Checkout #{checkin.id}',
+                monto=saldo_pendiente,
+                descripcion=f'Liquidación Check-out hab. {checkin.habitacion.numero} - Huésped: {checkin.huesped.nombre}',
+                pagada=True
             )
-
-        return Response(_serializar_detalle_checkin(checkin), status=status.HTTP_201_CREATED)
+            
+        
+            MovimientoCaja.objects.filter(
+                referencia=f'Check-in #{checkin.id}',
+                tipo=MovimientoCaja.Tipo.DEUDA
+            ).update(pagada=True)
+        
+        return Response(CheckOutSerializer(checkout).data, status=status.HTTP_201_CREATED)
 
 class CheckInActiveListView(APIView):
     permission_classes = [IsAuthenticated]
@@ -303,7 +363,6 @@ class CheckOutCreateView(APIView):
         serializer = CheckOutCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
-        # Validamos caja con iexact de forma idéntica a caja/views.py
         caja_activa = Caja.objects.filter(
             estado__iexact='ABIERTA'
         ).order_by('-fecha_apertura', '-hora_apertura').first()
@@ -315,34 +374,48 @@ class CheckOutCreateView(APIView):
             )
             
         resumen = _calcular_resumen_checkin(checkin)
+        monto_pago_adelantado = _to_decimal(checkin.monto_pagado)
+        total_gral = resumen['total_general']
+        saldo_pendiente = max(total_gral - monto_pago_adelantado, Decimal('0'))
+
         checkout_data = {
             'subtotal_habitacion': resumen['subtotal_habitacion'],
             'subtotal_adicionales': resumen['subtotal_adicionales'],
             'subtotal_market': resumen['subtotal_market'],
             'subtotal_cochera': resumen['subtotal_cochera'],
-            'total_general': resumen['total_general'],
+            'total_general': total_gral,
             'metodo_pago': serializer.validated_data['metodo_pago'],
-            'deuda_pendiente': max(resumen['total_general'] - _to_decimal(checkin.monto_pagado), Decimal('0')),
+            'deuda_pendiente': saldo_pendiente,
         }
         
+        # 1. Finalizamos el alquiler mediante el servicio
         checkout = CheckOutService().finalizar_alquiler(checkin_id, checkout_data, request.user)
         
-        # Registramos el cobro en la caja abierta
-        tipo_caja = checkout.metodo_pago if checkout.metodo_pago in {
-            MovimientoCaja.TipoCaja.EFECTIVO,
-            MovimientoCaja.TipoCaja.YAPE,
-            MovimientoCaja.TipoCaja.TARJETA,
-        } else MovimientoCaja.TipoCaja.EFECTIVO
+        # 2. Si el huésped tenía saldo pendiente y lo está liquidando ahora:
+        if saldo_pendiente > 0:
+            metodo_pago_raw = checkout.metodo_pago.upper() if checkout.metodo_pago else 'EFECTIVO'
+            tipo_caja = metodo_pago_raw if metodo_pago_raw in ['EFECTIVO', 'YAPE', 'TARJETA'] else 'EFECTIVO'
+            
+            # A) Registramos el INGRESO real del dinero en la caja (pagada=True)
+            # Corregido: Se marca pagada=True para que afecte correctamente los Ingresos del Día
+            MovimientoCaja.objects.create(
+                caja=caja_activa,
+                tipo=MovimientoCaja.Tipo.INGRESO,
+                tipo_caja=tipo_caja,
+                modulo=MovimientoCaja.Modulo.HOTEL,
+                referencia=f'Checkout #{checkin.id}',
+                monto=saldo_pendiente,
+                descripcion=f'Liquidación Check-out hab. {checkin.habitacion.numero} - Huésped: {checkin.huesped.nombre}',
+                pagada=True
+            )
+            
+            # B) ¡EL PASO MAGICO!: Buscamos la deuda del Check-In original y la marcamos como pagada
+            # Esto hace que desaparezca automáticamente de la sección "Pendientes de Pago" del Dashboard
+            MovimientoCaja.objects.filter(
+                referencia=f'Check-in #{checkin.id}',
+                tipo=MovimientoCaja.Tipo.DEUDA
+            ).update(pagada=True)
         
-        MovimientoCaja.objects.create(
-            caja=caja_activa,
-            tipo=MovimientoCaja.Tipo.INGRESO,
-            tipo_caja=tipo_caja,
-            modulo=MovimientoCaja.Modulo.HOTEL,
-            referencia=f'Checkout #{checkin.id}',
-            monto=checkout.deuda_pendiente, # Se cobra el saldo neto pendiente
-            descripcion=f'Cobro de salida de habitación {checkin.habitacion.numero}',
-        )
         return Response(CheckOutSerializer(checkout).data, status=status.HTTP_201_CREATED)
 
 class HealthHotelView(APIView):

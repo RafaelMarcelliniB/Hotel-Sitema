@@ -5,6 +5,8 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from django.utils import timezone
+import traceback
 
 from market.models import IngresoMercaderia, Producto, VentaMarket
 from market.serializers import (
@@ -14,7 +16,8 @@ from market.serializers import (
 	VentaMarketCreateSerializer,
 	VentaMarketSerializer,
 )
-from market.services import IngresoMercaderiaService, VentaMarketService
+from market.services import IngresoMercaderiaService, VentaMarketService, ProductoService
+
 
 
 def _serializar_venta(venta):
@@ -109,9 +112,22 @@ class VentaMarketViewSet(viewsets.ModelViewSet):
 		}
 		if data.get('checkin_vinculado_id'):
 			venta_data['checkin_vinculado_id'] = data['checkin_vinculado_id']
-		venta = VentaMarketService().registrar_venta_con_stock(venta_data, detalles, request.user)
-		return Response(_serializar_venta(venta), status=status.HTTP_201_CREATED)
-
+		
+		try:
+			# Ejecuta el flujo lógico que valida stock y caja activa
+			venta = VentaMarketService().registrar_venta_con_stock(venta_data, detalles, request.user)
+			return Response(_serializar_venta(venta), status=status.HTTP_201_CREATED)
+		
+		except ValueError as e:
+			# Captura el error de "No se puede registrar una venta si el trabajador no cuenta con una caja abierta..."
+			return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+		
+		except Exception as e:
+			# Muestra la traza exacta en tu consola de Django si ocurre un error 500 inesperado
+			print("=== ERROR 500 EN VENTAMARKETVIEWSET ===")
+			traceback.print_exc()
+			print("========================================")
+			return Response({'detail': f'Error interno en el servidor: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class HealthMarketView(APIView):
 	permission_classes = [IsAuthenticated]

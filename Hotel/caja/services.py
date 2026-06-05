@@ -40,13 +40,21 @@ class CajaService(BaseService):
         )
 
     def obtener_resumen(self, caja):
-        movimientos = caja.movimientos.all()
-        total_efectivo = movimientos.filter(tipo_caja=MovimientoCaja.TipoCaja.EFECTIVO, pagada=False).aggregate(total=Sum('monto')).get('total') or 0
-        total_yape = movimientos.filter(tipo_caja=MovimientoCaja.TipoCaja.YAPE, pagada=False).aggregate(total=Sum('monto')).get('total') or 0
-        total_tarjeta = movimientos.filter(tipo_caja=MovimientoCaja.TipoCaja.TARJETA, pagada=False).aggregate(total=Sum('monto')).get('total') or 0
+        # Capturamos todos los movimientos del turno actual
+        movimientos = caja.movimientos.all().order_by('fecha_hora')
+        
+        # Filtramos y sumamos de manera limpia por cada tipo de caja
+        total_efectivo = movimientos.filter(tipo_caja=MovimientoCaja.TipoCaja.EFECTIVO).aggregate(total=Sum('monto')).get('total') or 0
+        total_yape = movimientos.filter(tipo_caja=MovimientoCaja.TipoCaja.YAPE).aggregate(total=Sum('monto')).get('total') or 0
+        total_tarjeta = movimientos.filter(tipo_caja=MovimientoCaja.TipoCaja.TARJETA).aggregate(total=Sum('monto')).get('total') or 0
+        
         total_ingresos = movimientos.filter(tipo=MovimientoCaja.Tipo.INGRESO).aggregate(total=Sum('monto')).get('total') or 0
         total_egresos = movimientos.filter(tipo=MovimientoCaja.Tipo.EGRESO).aggregate(total=Sum('monto')).get('total') or 0
         deudas = movimientos.filter(tipo=MovimientoCaja.Tipo.DEUDA, pagada=False)
+        
+        # OPERACIÓN MATEMÁTICA: Sumamos la base con los ingresos reales y restamos egresos
+        total_general = float(caja.monto_inicial) + float(total_efectivo) + float(total_yape) + float(total_tarjeta) - float(total_egresos)
+        
         return {
             'monto_inicial': caja.monto_inicial,
             'total_efectivo': total_efectivo,
@@ -54,6 +62,7 @@ class CajaService(BaseService):
             'total_tarjeta': total_tarjeta,
             'total_ingresos': total_ingresos,
             'total_egresos': total_egresos,
+            'total_general': total_general,  
             'deudas_pendientes': deudas,
             'movimientos': movimientos,
         }

@@ -73,7 +73,9 @@ export default function Dashboard() {
         {/* Pendientes de Pago */}
         <Card className="border-l-4 border-l-red-500">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Pendientes de Pago</p>
-          <h3 className="mt-2 text-4xl font-black text-red-600">S/ {data.deudasPendientes || '0.00'}</h3>
+          <h3 className="mt-2 text-4xl font-black text-red-600">
+            S/ {typeof data.deudasPendientes === 'number' ? data.deudasPendientes.toFixed(2) : '0.00'}
+          </h3>
           <p className="text-xs text-slate-400 mt-2">Cuentas por cobrar</p>
         </Card>
       </section>

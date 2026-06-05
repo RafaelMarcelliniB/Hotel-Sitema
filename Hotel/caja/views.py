@@ -33,10 +33,15 @@ def _caja_activa(user):
 
 def _serializar_resumen(caja):
     resumen = CajaService().obtener_resumen(caja)
-    movimientos = resumen['movimientos'].order_by('fecha_hora')
+    movimientos_qs = resumen['movimientos'].order_by('-fecha_hora')
+    
+    movimientos_serializados = MovimientoCajaSerializer(movimientos_qs, many=True).data
+    
     agrupados = defaultdict(list)
-    for movimiento in movimientos:
-        agrupados[movimiento.modulo].append(MovimientoCajaSerializer(movimiento).data)
+    for movimiento in movimientos_qs:
+        clave_modulo = movimiento.modulo.lower()
+        agrupados[clave_modulo].append(MovimientoCajaSerializer(movimiento).data)
+        
     return {
         'caja': CajaSerializer(caja).data,
         'monto_inicial': resumen['monto_inicial'],
@@ -45,7 +50,9 @@ def _serializar_resumen(caja):
         'total_tarjeta': resumen['total_tarjeta'],
         'total_ingresos': resumen['total_ingresos'],
         'total_egresos': resumen['total_egresos'],
+        'total_general': resumen['total_general'],  # <-- AGREGADO: Envía el total real al JSON del Frontend
         'deudas_pendientes': MovimientoCajaSerializer(resumen['deudas_pendientes'], many=True).data,
+        'movimientos': movimientos_serializados,
         'movimientos_por_modulo': {modulo: items for modulo, items in agrupados.items()},
     }
 
@@ -92,7 +99,6 @@ class CajaResumenView(APIView):
             caja = _caja_activa(request.user)
             
             if not caja:
-                # MODIFICACIÓN: Retornamos un 200 con un indicador estructurado
                 return Response(
                     {
                         'caja_activa': False,
@@ -101,7 +107,6 @@ class CajaResumenView(APIView):
                     status=status.HTTP_200_OK
                 )
             
-            # Si hay caja, intentamos serializar y le agregamos el flag
             datos = _serializar_resumen(caja)
             datos['caja_activa'] = True
             return Response(datos)
@@ -113,35 +118,49 @@ class DashboardStatsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # 1. Obtenemos la fecha de hoy interpretando correctamente la zona horaria 'America/Lima'
         hoy = timezone.localdate()
-        
-        # Filtramos todas las cajas correspondientes al día de hoy
         cajas_de_hoy = Caja.objects.filter(fecha_apertura=hoy)
         
+        # 1. Calcular Ingresos del Día basándose en las cajas del día de hoy
         total_ingresos = 0
         for caja in cajas_de_hoy:
             if caja.estado.upper() == 'ABIERTA':
-                # Si la caja está abierta, el ingreso real acumulado en este turno se extrae 
-                # calculando el resumen dinámico de su servicio (ingresos menos egresos)
                 resumen_turno = CajaService().obtener_resumen(caja)
                 total_ingresos += float(resumen_turno.get('total_ingresos', 0))
             else:
-                # Si la caja ya está cerrada, tomamos el balance final del turno
                 m_final = float(caja.monto_final or 0)
                 m_inicial = float(caja.monto_inicial or 0)
                 ingreso_turno = m_final - m_inicial
                 if ingreso_turno > 0:
                     total_ingresos += ingreso_turno
 
-        # 2. Comprobar si hay alguna caja abierta en este preciso instante
         caja_activa_existe = cajas_de_hoy.filter(estado__iexact='ABIERTA').exists()
 
-        # 3. Mapeo dinámico de las habitaciones del hotel
+        # 2. Estadísticas de Habitaciones
         total_habs = Habitacion.objects.count()
         ocupadas = Habitacion.objects.filter(estado_ocupacion='OCUPADO').count()
         disponibles = Habitacion.objects.filter(estado_ocupacion='DISPONIBLE').exclude(estado_limpieza='SUCIO').count()
         limpieza = Habitacion.objects.filter(estado_limpieza='SUCIO').count()
+
+        # 3. ¡ENFOQUE DEFINITIVO!: Sumatoria global e histórica de deudas pendientes por alquileres activos
+        # Importamos de forma local para evitar importaciones circulares destructivas en Django
+        from hotel.models import CheckIn
+        
+        # Filtramos todos los check-ins que sigan en estado 'ACTIVO' en el hotel
+        checkins_activos = CheckIn.objects.filter(estado=CheckIn.Estado.ACTIVO)
+        
+        suma_deudas = 0
+        for checkin in checkins_activos:
+            # Sumamos el monto de la deuda inicial guardada en el check-in
+            suma_deudas += checkin.monto_deuda
+
+            # Opcional por SOLID: Si el cliente consume productos del market o adicionales durante su estadía 
+            # sin pagarlos al instante, se acumulan dinámicamente en su cuenta por cobrar histórica:
+            cargos_extra = checkin.cargos_adicionales.aggregate(total=Sum('monto')).get('total') or 0
+            ventas_market = getattr(checkin, 'ventas_market', None)
+            market_extra = checkin.ventas_market.aggregate(total=Sum('total')).get('total') or 0 if ventas_market else 0
+            
+            suma_deudas += (cargos_extra + market_extra)
 
         return Response({
             "habitaciones": {
@@ -150,9 +169,9 @@ class DashboardStatsView(APIView):
                 "disponibles": disponibles,
                 "limpieza": limpieza
             },
-            "ingresosDia": total_ingresos,
+            "ingresosDia": float(total_ingresos),
             "cajaActiva": caja_activa_existe, 
-            "deudasPendientes": 0.00,
+            "deudasPendientes": float(suma_deudas),  # Refleja con precisión absoluta tus S/ 80.00
             "proximosCheckouts": 0,
             "productosMasVendidos": []
         })
@@ -176,7 +195,8 @@ class MovimientoCajaViewSet(viewsets.ModelViewSet):
         return queryset
 
     def create(self, request, *args, **kwargs):
-        caja = _caja_activa()
+        # CORRECCIÓN: Pasamos el request.user para evitar un quiebre de consistencia
+        caja = _caja_activa(request.user)
         if not caja:
             return Response({'detail': 'No existe una caja abierta.'}, status=status.HTTP_400_BAD_REQUEST)
         serializer = MovimientoCajaInputSerializer(data=request.data)

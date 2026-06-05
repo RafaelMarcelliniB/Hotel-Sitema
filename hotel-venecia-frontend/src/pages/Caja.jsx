@@ -27,7 +27,6 @@ export default function Caja() {
   }
 
   // 2. Si no hay caja activa (el backend devuelve 404 o resumen.caja es nulo)
-  // Nota: Según tus logs, el backend envía { "caja": {...} }, por eso validamos resumen.caja
   if (!resumen || !resumen.caja) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] text-center px-4">
@@ -83,8 +82,8 @@ export default function Caja() {
         </Button>
       </div>
 
-      {/* Tarjetas de Totales */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Tarjetas de Totales - Ajustado de lg:grid-cols-4 a lg:grid-cols-5 */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <Card className="border-l-4 border-l-blue-500">
           <p className="text-xs font-bold text-slate-500 uppercase">Monto Inicial</p>
           <p className="text-2xl font-bold text-slate-800">S/ {Number(resumen.monto_inicial).toFixed(2)}</p>
@@ -103,6 +102,12 @@ export default function Caja() {
         <Card className="border-l-4 border-l-orange-500">
           <p className="text-xs font-bold text-slate-500 uppercase">Tarjetas</p>
           <p className="text-2xl font-bold text-orange-600">S/ {Number(resumen.total_tarjeta).toFixed(2)}</p>
+        </Card>
+
+        {/* AGREGADO: Quinto recuadro idéntico para el Total General */}
+        <Card className="border-l-4 border-l-slate-700">
+          <p className="text-xs font-bold text-slate-500 uppercase">Total General</p>
+          <p className="text-2xl font-bold text-slate-800">S/ {Number(resumen.total_general || 0).toFixed(2)}</p>
         </Card>
       </div>
 
@@ -134,13 +139,13 @@ export default function Caja() {
                     <td className="px-4 py-3">
                       <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${
                         mov.tipo === 'INGRESO' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                      }`}>
+                      }`}>\
                         {mov.tipo}
                       </span>
                     </td>
                     <td className={`px-4 py-3 text-right font-bold ${
                       mov.tipo === 'INGRESO' ? 'text-green-600' : 'text-red-600'
-                    }`}>
+                    }`}>\
                       {mov.tipo === 'INGRESO' ? '+' : '-'} S/ {Number(mov.monto).toFixed(2)}
                     </td>
                   </tr>
