@@ -13,23 +13,26 @@ export function useCajas() {
 
   // Obtener resumen detallado de la caja activa
   const useResumen = () => useQuery({
-    queryKey: ['caja-resumen'],
-    queryFn: async () => {
-      try {
-        const { data } = await api.get('/caja/resumen/')
-        return data
-      } catch (err) {
-        // Si el backend devuelve 400 o 404, asumimos que no hay caja activa
-        if (err.response?.status === 400 || err.response?.status === 404) {
-          return null
+      queryKey: ['caja-resumen'],
+      queryFn: async () => {
+        try {
+          const { data } = await api.get('/caja/resumen/')
+          
+          // MODIFICACIÓN: Si el backend nos avisa que no hay caja activa, devolvemos null
+          if (data && data.caja_activa === false) {
+            return null
+          }
+          
+          return data
+        } catch (err) {
+          // Esto solo se ejecutará si de verdad se cae el servidor (500, etc)
+          throw err
         }
-        throw err
-      }
-    },
-    refetchInterval: 10000, // Actualiza cada 10 segundos para mayor fluidez
-    staleTime: 0,           // Considera los datos viejos de inmediato
-    retry: false            
-  })
+      },
+      refetchInterval: 10000, 
+      staleTime: 0,            
+      retry: false            
+    })
 
   const abrirCaja = useMutation({
     mutationFn: async (datos) => {
@@ -37,9 +40,9 @@ export function useCajas() {
       return data
     },
     onSuccess: () => {
-      // Forzar actualización de todas las queries relacionadas a caja
       queryClient.invalidateQueries(['cajas'])
       queryClient.invalidateQueries(['caja-resumen'])
+      queryClient.invalidateQueries(['dashboard-metrics']) // <-- CORRECCIÓN: Actualiza el Dashboard al abrir
     }
   })
 
@@ -51,6 +54,7 @@ export function useCajas() {
     onSuccess: () => {
       queryClient.invalidateQueries(['cajas'])
       queryClient.invalidateQueries(['caja-resumen'])
+      queryClient.invalidateQueries(['dashboard-metrics']) // <-- CORRECCIÓN: Actualiza el Dashboard al cerrar
     }
   })
 

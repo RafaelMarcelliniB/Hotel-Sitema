@@ -1,4 +1,7 @@
 from collections import defaultdict
+from datetime import date
+from django.utils import timezone
+from django.db.models import Sum
 
 from rest_framework import status, viewsets
 from rest_framework.permissions import IsAuthenticated
@@ -6,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from caja.models import Caja, MovimientoCaja
+from hotel.models import Habitacion
 from caja.serializers import (
     CajaAperturaSerializer,
     CajaCierreSerializer,
@@ -14,6 +18,7 @@ from caja.serializers import (
     MovimientoCajaSerializer,
 )
 from caja.services import CajaService, MovimientoCajaService
+
 
 
 def _caja_activa(user):
@@ -87,19 +92,70 @@ class CajaResumenView(APIView):
             caja = _caja_activa(request.user)
             
             if not caja:
-                # El 404 es correcto para que React sepa que no hay caja
+                # MODIFICACIÓN: Retornamos un 200 con un indicador estructurado
                 return Response(
-                    {'detail': 'Sin caja activa'}, 
-                    status=status.HTTP_404_NOT_FOUND
+                    {
+                        'caja_activa': False,
+                        'detail': 'Sin caja activa'
+                    }, 
+                    status=status.HTTP_200_OK
                 )
             
-            # Si hay caja, intentamos serializar
+            # Si hay caja, intentamos serializar y le agregamos el flag
             datos = _serializar_resumen(caja)
+            datos['caja_activa'] = True
             return Response(datos)
             
         except Exception as e:
-            # Si algo falla en la lógica, que nos diga qué es
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+class DashboardStatsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # 1. Obtenemos la fecha de hoy interpretando correctamente la zona horaria 'America/Lima'
+        hoy = timezone.localdate()
+        
+        # Filtramos todas las cajas correspondientes al día de hoy
+        cajas_de_hoy = Caja.objects.filter(fecha_apertura=hoy)
+        
+        total_ingresos = 0
+        for caja in cajas_de_hoy:
+            if caja.estado.upper() == 'ABIERTA':
+                # Si la caja está abierta, el ingreso real acumulado en este turno se extrae 
+                # calculando el resumen dinámico de su servicio (ingresos menos egresos)
+                resumen_turno = CajaService().obtener_resumen(caja)
+                total_ingresos += float(resumen_turno.get('total_ingresos', 0))
+            else:
+                # Si la caja ya está cerrada, tomamos el balance final del turno
+                m_final = float(caja.monto_final or 0)
+                m_inicial = float(caja.monto_inicial or 0)
+                ingreso_turno = m_final - m_inicial
+                if ingreso_turno > 0:
+                    total_ingresos += ingreso_turno
+
+        # 2. Comprobar si hay alguna caja abierta en este preciso instante
+        caja_activa_existe = cajas_de_hoy.filter(estado__iexact='ABIERTA').exists()
+
+        # 3. Mapeo dinámico de las habitaciones del hotel
+        total_habs = Habitacion.objects.count()
+        ocupadas = Habitacion.objects.filter(estado_ocupacion='OCUPADO').count()
+        disponibles = Habitacion.objects.filter(estado_ocupacion='DISPONIBLE').exclude(estado_limpieza='SUCIO').count()
+        limpieza = Habitacion.objects.filter(estado_limpieza='SUCIO').count()
+
+        return Response({
+            "habitaciones": {
+                "total": total_habs,
+                "ocupadas": ocupadas,
+                "disponibles": disponibles,
+                "limpieza": limpieza
+            },
+            "ingresosDia": total_ingresos,
+            "cajaActiva": caja_activa_existe, 
+            "deudasPendientes": 0.00,
+            "proximosCheckouts": 0,
+            "productosMasVendidos": []
+        })
 
 class MovimientoCajaViewSet(viewsets.ModelViewSet):
     queryset = MovimientoCaja.objects.select_related('caja').order_by('-fecha_hora')

@@ -352,6 +352,7 @@ class HealthHotelView(APIView):
         return Response({'module': 'hotel', 'status': 'ok'})
 
 
+
 # ════════════════════════════════════════
 # SOLID APLICADO EN ESTE ARCHIVO:
 # S - Single Responsibility: cada vista atiende un solo flujo del módulo hotel.

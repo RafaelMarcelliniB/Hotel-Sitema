@@ -4,6 +4,7 @@ import HabitacionCard from '../components/hotel/HabitacionCard'
 import ModalCheckIn from '../components/hotel/ModalCheckIn'
 import ModalCheckOut from '../components/hotel/ModalCheckOut' 
 import Spinner from '../components/ui/Spinner'
+import api from '../api/axiosConfig' 
 
 export default function Hotel() {
   const { habitaciones, isLoading, refetch } = useHabitaciones()
@@ -11,16 +12,41 @@ export default function Hotel() {
   const [showCheckIn, setShowCheckIn] = useState(false)
   const [showCheckOut, setShowCheckOut] = useState(false) 
 
+  // Nueva función para consumir el endpoint de limpieza que tienes en Django
+  const handleTerminarLimpieza = async (habitacionId, numeroHabitacion) => {
+    const confirmar = window.confirm(
+      `¿Confirmas que la Habitación #${numeroHabitacion} ya está limpia y lista para volver a estar disponible?`
+    );
+    
+    if (confirmar) {
+      try {
+        // Ejecuta un POST a la ruta que configuraste en tu urls.py
+        await api.post(`/hotel/habitaciones/${habitacionId}/limpiar/`);
+        alert(`¡Habitación #${numeroHabitacion} marcada como LIMPIA con éxito!`);
+        refetch(); // Refresca automáticamente el mapa para que vuelva a salir verde
+      } catch (error) {
+        console.error("Error al limpiar la habitación:", error);
+        alert("Ocurrió un error al intentar actualizar el estado de limpieza.");
+      }
+    }
+  };
+
   const handleRoomClick = (hab) => {
     console.log("Datos de habitación seleccionada:", hab);
-    setSelectedHab(hab);
 
-    // Comparamos con el estado que viene de tu base de datos
-    // En tu imagen se ve "OCUPADO", así que validamos esa cadena
+    // 1. PRIMERA VALIDACIÓN: Si está OCUPADA, se abre el Check-Out obligatoriamente
     if (hab.estado_ocupacion === 'OCUPADO' || hab.estado === 'OCUPADO') {
+      setSelectedHab(hab);
       setShowCheckOut(true);
       setShowCheckIn(false);
-    } else {
+    } 
+    // 2. SEGUNDA VALIDACIÓN: Si NO está ocupada pero está SUCIA, se dispara la limpieza
+    else if (hab.estado_limpieza === 'SUCIO') {
+      handleTerminarLimpieza(hab.id, hab.numero);
+    } 
+    // 3. TERCERA OPCIÓN: Si está limpia y libre, se abre el Check-In para alquilarla
+    else {
+      setSelectedHab(hab);
       setShowCheckIn(true);
       setShowCheckOut(false);
     }

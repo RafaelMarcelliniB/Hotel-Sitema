@@ -33,26 +33,44 @@ export default function Dashboard() {
 
       {/* KPIs Principales */}
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {/* Hab. Ocupadas */}
         <Card className="border-l-4 border-l-blue-500">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Hab. Ocupadas</p>
           <h3 className="mt-2 text-4xl font-black text-slate-900">{data.habitaciones?.ocupadas || 0}</h3>
           <div className="mt-2 text-xs text-blue-600 font-semibold">
-            {Math.round((data.habitaciones?.ocupadas / (data.habitaciones?.ocupadas + data.habitaciones?.disponibles)) * 100) || 0}% Ocupación
+            {Math.round((data.habitaciones?.ocupadas / (data.habitaciones?.total || 1)) * 100) || 0}% Ocupación
           </div>
         </Card>
 
+        {/* Ingresos del Día - CORREGIDO Y DINÁMICO */}
         <Card className="border-l-4 border-l-green-500">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Ingresos del Día</p>
-          <h3 className="mt-2 text-4xl font-black text-green-600">S/ {data.ingresosDia || '0.00'}</h3>
-          <p className="text-xs text-slate-400 mt-2">Caja activa: Turno actual</p>
+          <h3 className="mt-2 text-4xl font-black text-green-600">
+            S/ {typeof data.ingresosDia === 'number' ? data.ingresosDia.toFixed(2) : '0.00'}
+          </h3>
+          <div className="mt-2 text-xs font-medium">
+            {data.cajaActiva ? (
+              <span className="text-green-600 flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse"></span>
+                Caja activa: Turno actual
+              </span>
+            ) : (
+              <span className="text-amber-600 flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-amber-500"></span>
+                Turnos cerrados (Total acumulado)
+              </span>
+            )}
+          </div>
         </Card>
 
+        {/* Disponibles */}
         <Card className="border-l-4 border-l-orange-500">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Disponibles</p>
           <h3 className="mt-2 text-4xl font-black text-slate-900">{data.habitaciones?.disponibles || 0}</h3>
           <p className="text-xs text-orange-600 mt-2 font-medium">Listas para check-in</p>
         </Card>
 
+        {/* Pendientes de Pago */}
         <Card className="border-l-4 border-l-red-500">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Pendientes de Pago</p>
           <h3 className="mt-2 text-4xl font-black text-red-600">S/ {data.deudasPendientes || '0.00'}</h3>

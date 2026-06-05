@@ -5,7 +5,8 @@ export function useDashboard() {
   const query = useQuery({
     queryKey: ['dashboard-metrics'],
     queryFn: getDashboardMetrics,
-    refetchInterval: 1000 * 60 * 5, // Se actualiza cada 5 min
+    refetchInterval: 1000 * 10, 
+    staleTime: 0,               
   })
 
   return {

@@ -139,14 +139,56 @@ export default function ModalCheckIn({ habitacion, onClose, onSuccess }) {
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Celular</label>
-              <input type="text" name="telefono" value={huesped.telefono} onChange={handleInputChange} className="w-full text-sm border px-3 py-2 rounded-lg" />
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Celular</label>
+                <input type="text" name="telefono" value={huesped.telefono} onChange={handleInputChange} className="w-full text-sm border px-3 py-2 rounded-lg" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Ciudad de Origen</label>
+                <input type="text" name="ciudad_origen" value={huesped.ciudad_origen} onChange={handleInputChange} className="w-full text-sm border px-3 py-2 rounded-lg" placeholder="Ej. Lima, Huánuco" />
+              </div>
+            </div>
+
+            {/* NUEVOS DESPLEGABLES: Nacionalidad, Estado Civil y Tipo de Visita */}
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Nacionalidad</label>
+                <Select 
+                  name="nacionalidad" 
+                  value={huesped.nacionalidad} 
+                  onChange={handleInputChange}
+                >
+                  <option value="PERU">Perú</option>
+                  <option value="EXTRANJERO">Extranjero</option>
+                </Select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Estado Civil</label>
+                <Select 
+                  name="estado_civil" 
+                  value={huesped.estado_civil} 
+                  onChange={handleInputChange}
+                >
+                  <option value="SOLTERO">Soltero(a)</option>
+                  <option value="PAREJA">En Pareja</option>
+                  <option value="CASADO">Casado(a)</option>
+                </Select>
+              </div>
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Ciudad de Origen</label>
-              <input type="text" name="ciudad_origen" value={huesped.ciudad_origen} onChange={handleInputChange} className="w-full text-sm border px-3 py-2 rounded-lg" placeholder="Ej. Lima, Huánuco" />
+              <label className="block text-xs font-medium text-slate-600 mb-1">Tipo de Visita</label>
+              <Select 
+                name="tipo_visita" 
+                value={huesped.tipo_visita} 
+                onChange={handleInputChange}
+              >
+                <option value="INDEPENDIENTE">Independiente</option>
+                <option value="VIAJERO">Viajero</option>
+                <option value="TURISTA">Turista</option>
+              </Select>
             </div>
           </div>
 
@@ -159,6 +201,7 @@ export default function ModalCheckIn({ habitacion, onClose, onSuccess }) {
                 <label className="block text-xs font-medium text-slate-600 mb-1">Turno</label>
                 <Select value={turnoIngreso} onChange={(e) => setTurnoIngreso(e.target.value)}>
                   <option value="DIA">Día</option>
+                  <option value="TARDE">Tarde</option>
                   <option value="NOCHE">Noche</option>
                   <option value="MADRUGADA">Madrugada</option>
                 </Select>
