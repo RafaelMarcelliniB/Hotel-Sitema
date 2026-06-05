@@ -1,130 +1,216 @@
-import { useForm } from 'react-hook-form'
-import { Input } from '../ui/Input'
-import { Button } from '../ui/Button'
-import { Select } from '../ui/Select'
-import api from '../../api/axiosConfig'
+import React, { useState } from 'react';
+import { Button } from '../ui/Button';
+import { Select } from '../ui/Select';
+import api from '../../api/axiosConfig';
 
 export default function ModalCheckIn({ habitacion, onClose, onSuccess }) {
-  const { register, handleSubmit, formState: { errors } } = useForm({
-    defaultValues: {
-      habitacion_id: habitacion.id,
-      monto_pagado: habitacion.tarifa_dia,
-      tipo_pago: 'EFECTIVO',
-      turno_ingreso: 'DIA',
-      nacionalidad: 'Perú' // Valor por defecto común
-    }
-  })
+  const [loading, setLoading] = useState(false);
+  const [montoPagado, setMontoPagado] = useState(habitacion?.precio || 0);
+  const [turnoIngreso, setTurnoIngreso] = useState('DIA');
+  const [tipoPago, setTipoPago] = useState('EFECTIVO');
+  const [esPareja, setEsPareja] = useState(false);
 
-  const onSubmit = async (data) => {
-    const formattedData = {
-      habitacion_id: data.habitacion_id,
-      turno_ingreso: data.turno_ingreso,
-      tipo_pago: data.tipo_pago,
-      monto_pagado: data.monto_pagado,
-      // Agrupamos todos los datos del nuevo huésped
-      huesped: {
-        dni_pasaporte: data.dni_pasaporte,
-        nombre: data.nombre,
-        apellido: data.apellido,
-        nacionalidad: data.nacionalidad,
-        ciudad_origen: data.ciudad_origen,
-        estado_civil: 'SOLTERO', // Campos opcionales o con defecto
-        tipo_visita: 'TURISTA'
+  // Formulario del Huésped
+  const [huesped, setHuesped] = useState({
+    nombre: '',
+    apellido: '',
+    dni_pasaporte: '',
+    telefono: '',
+    ciudad_origen: '',
+    nacionalidad: 'PERU',
+    estado_civil: 'SOLTERO',
+    tipo_visita: 'INDEPENDIENTE'
+  });
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setHuesped(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleBuscarHuesped = async () => {
+    if (!huesped.dni_pasaporte) return;
+    try {
+      setLoading(true);
+      const response = await api.get(`/hotel/huespedes/?dni=${huesped.dni_pasaporte}`);
+      if (response.data && response.data.length > 0) {
+        const found = response.data[0];
+        setHuesped({
+          nombre: found.nombre || '',
+          apellido: found.apellido || '',
+          dni_pasaporte: found.dni_pasaporte || '',
+          telefono: found.telefono || '',
+          ciudad_origen: found.ciudad_origen || '',
+          nacionalidad: found.nacionalidad || 'PERU',
+          estado_civil: found.estado_civil || 'SOLTERO',
+          tipo_visita: found.tipo_visita || 'INDEPENDIENTE'
+        });
       }
+    } catch (err) {
+      console.error("Error al buscar huésped:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirmarIngreso = async (e) => {
+    e.preventDefault();
+    if (!huesped.nombre || !huesped.apellido || !huesped.dni_pasaporte) {
+      alert("Por favor, complete los datos obligatorios del huésped (Nombre, Apellido y Documento).");
+      return;
     }
 
     try {
-      await api.post('/hotel/checkin/', formattedData)
-      onSuccess()
-      onClose()
-    } catch (err) {
-      console.error("Error al registrar:", err.response?.data)
-      const errorMsg = err.response?.data?.error || "Error al procesar el check-in."
-      alert(errorMsg)
-    }
-  }
+      setLoading(true);
 
-  if (!habitacion) return null
+      // Cuerpo de datos mapeado uno a uno con CheckInCreateSerializer de Django
+      const payload = {
+        habitacion_id: habitacion.id,
+        turno_ingreso: turnoIngreso,
+        tipo_pago: tipoPago,
+        monto_pagado: parseFloat(montoPagado),
+        es_pareja: esPareja,
+        huesped: huesped
+      };
+
+      await api.post('/hotel/checkin/', payload);
+      
+      onSuccess(); // Actualiza el mapa de cuartos
+    } catch (err) {
+      console.error("Error en el Check-in:", err);
+      const errorServer = err.response?.data?.error || "Error al registrar el ingreso. Verifique que la caja esté abierta.";
+      alert(errorServer);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!habitacion) return null;
 
   return (
     <>
-      <div className="fixed inset-0 bg-slate-900/40 z-50 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white z-50 shadow-2xl flex flex-col">
+      <div className="fixed inset-0 bg-slate-900/50 z-50 backdrop-blur-sm" onClick={onClose} />
+      
+      <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white z-50 shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
         
-        <div className="p-6 border-b bg-slate-50 flex justify-between items-center">
+        {/* Cabecera */}
+        <div className="p-6 border-b bg-emerald-50 flex justify-between items-center">
           <div>
-            <h3 className="text-xl font-bold text-slate-800">Habitación #{habitacion.numero}</h3>
-            <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Registro de Ingreso</p>
+            <h3 className="text-xl font-bold text-emerald-900">Habitación #{habitacion.numero}</h3>
+            <p className="text-[10px] text-emerald-600 font-black uppercase tracking-widest">Registrar Ingreso (Check-In)</p>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-800 text-2xl">&times;</button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-8">
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+        <form onSubmit={handleConfirmarIngreso} className="flex-1 overflow-y-auto p-6 space-y-5">
+          
+          {/* Bloque Búsqueda de Huésped */}
+          <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Datos del Huésped</h4>
             
-            {/* SECCIÓN DEL HUÉSPED */}
-            <div className="space-y-4">
-              <h4 className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Información Personal</h4>
-              
-              <Input 
-                label="DNI / Pasaporte" 
-                placeholder="Número de documento" 
-                {...register('dni_pasaporte', { required: "Este campo es obligatorio" })} 
-                error={errors.dni_pasaporte?.message}
-              />
-              
-              <div className="grid grid-cols-2 gap-4">
-                <Input label="Nombres" placeholder="Nombre(s)" {...register('nombre', { required: true })} />
-                <Input label="Apellidos" placeholder="Apellido(s)" {...register('apellido', { required: true })} />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <Input label="Nacionalidad" placeholder="Ej. Nacionalidad" {...register('nacionalidad')} />
-                <Input label="Ciudad de Origen" placeholder="Ej. Ciudad de Origen" {...register('ciudad_origen')} />
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">DNI / Pasaporte *</label>
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  name="dni_pasaporte" 
+                  value={huesped.dni_pasaporte} 
+                  onChange={handleInputChange}
+                  className="flex-1 text-sm border px-3 py-2 rounded-lg focus:outline-emerald-500"
+                  required
+                />
+                <button 
+                  type="button" 
+                  onClick={handleBuscarHuesped}
+                  className="bg-slate-800 text-white text-xs px-3 rounded-lg hover:bg-slate-700 transition-colors"
+                >
+                  Buscar
+                </button>
               </div>
             </div>
 
-            {/* SECCIÓN DE PAGO */}
-            <div className="space-y-4 pt-6 border-t border-slate-100">
-              <h4 className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Detalles de Estancia y Pago</h4>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <Select label="Turno de Ingreso" {...register('turno_ingreso')}>
-                  <option value="DIA">Turno Día</option>
-                  <option value="NOCHE">Turno Tarde</option>
-                  <option value="NOCHE">Turno Noche</option>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Nombre *</label>
+                <input type="text" name="nombre" value={huesped.nombre} onChange={handleInputChange} className="w-full text-sm border px-3 py-2 rounded-lg" required />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Apellido *</label>
+                <input type="text" name="apellido" value={huesped.apellido} onChange={handleInputChange} className="w-full text-sm border px-3 py-2 rounded-lg" required />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Celular</label>
+              <input type="text" name="telefono" value={huesped.telefono} onChange={handleInputChange} className="w-full text-sm border px-3 py-2 rounded-lg" />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Ciudad de Origen</label>
+              <input type="text" name="ciudad_origen" value={huesped.ciudad_origen} onChange={handleInputChange} className="w-full text-sm border px-3 py-2 rounded-lg" placeholder="Ej. Lima, Huánuco" />
+            </div>
+          </div>
+
+          {/* Detalles del Hospedaje */}
+          <div className="space-y-4">
+            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b pb-1">Detalles del Alquiler</h4>
+            
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Turno</label>
+                <Select value={turnoIngreso} onChange={(e) => setTurnoIngreso(e.target.value)}>
+                  <option value="DIA">Día</option>
+                  <option value="NOCHE">Noche</option>
                   <option value="MADRUGADA">Madrugada</option>
                 </Select>
-                <Input 
-                  label="Tarifa Aplicada (S/)" 
-                  type="number" 
-                  step="0.01" 
-                  {...register('monto_pagado')} 
-                />
               </div>
 
-              <Select label="Método de Pago" {...register('tipo_pago')}>
-                <option value="EFECTIVO">Efectivo</option>
-                <option value="YAPE">Yape / Plin</option>
-                <option value="TARJETA">Tarjeta de Débito/Crédito</option>
-              </Select>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Método Pago</label>
+                <Select value={tipoPago} onChange={(e) => setTipoPago(e.target.value)}>
+                  <option value="EFECTIVO">Efectivo</option>
+                  <option value="YAPE">Yape / Plin</option>
+                  <option value="TARJETA">Tarjeta</option>
+                </Select>
+              </div>
             </div>
 
-            <div className="pt-4">
-              <Button type="submit" className="w-full py-4 text-base font-bold shadow-lg shadow-blue-200">
-                Confirmar e Iniciar Estancia
-              </Button>
-              <button 
-                type="button" 
-                onClick={onClose}
-                className="w-full mt-4 text-sm font-semibold text-slate-400 hover:text-slate-600 transition-colors"
-              >
-                Cancelar registro
-              </button>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Monto Pagado Adelantado (S/)</label>
+              <input 
+                type="number" 
+                step="0.01" 
+                value={montoPagado} 
+                onChange={(e) => setMontoPagado(e.target.value)} 
+                className="w-full text-sm border px-3 py-2 rounded-lg font-bold text-slate-800 focus:outline-emerald-500" 
+              />
+              <p className="text-[11px] text-slate-400 mt-1">Precio sugerido de la habitación: S/ {habitacion.precio}</p>
             </div>
-          </form>
-        </div>
+
+            <div className="flex items-center gap-2 pt-1">
+              <input 
+                type="checkbox" 
+                id="es_pareja" 
+                checked={esPareja} 
+                onChange={(e) => setEsPareja(e.target.checked)} 
+                className="h-4 w-4 text-emerald-600 border-slate-300 rounded"
+              />
+              <label htmlFor="es_pareja" className="text-xs font-medium text-slate-700 select-none">¿Ingresa acompañado? (Pareja)</label>
+            </div>
+          </div>
+
+          {/* Botón enviar */}
+          <div className="pt-4">
+            <Button 
+              type="submit" 
+              disabled={loading} 
+              className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-lg transition-transform active:scale-95"
+            >
+              {loading ? 'Procesando Registro...' : 'Confirmar Ingreso'}
+            </Button>
+          </div>
+
+        </form>
       </div>
     </>
-  )
+  );
 }

@@ -101,6 +101,12 @@ def _serializar_detalle_checkin(checkin):
     cargos = CargoAdicionalSerializer(checkin.cargos_adicionales.all(), many=True).data
     entrada = timezone.make_aware(timezone.datetime.combine(checkin.fecha_entrada, checkin.hora_entrada))
     tiempo_transcurrido = timezone.localtime() - entrada
+
+    # CALCULAMOS EL SALDO PENDIENTE: Total general menos lo que ya pagó de adelanto
+    monto_pago_adelantado = _to_decimal(checkin.monto_pagado)
+    total_gral = resumen['total_general']
+    saldo_pend = max(total_gral - monto_pago_adelantado, Decimal('0'))
+
     return {
         'id': checkin.id,
         'estado': checkin.estado,
@@ -119,7 +125,12 @@ def _serializar_detalle_checkin(checkin):
         'ventas_market': ventas,
         'vehiculos_cochera': vehiculos,
         'tiempo_transcurrido': str(tiempo_transcurrido),
-        **resumen,
+        
+        # MAPEO CLAVE PARA EL FRONTEND (ModalCheckOut.jsx)
+        'monto_habitacion': resumen['subtotal_habitacion'],
+        'monto_adicionales': resumen['subtotal_adicionales'] + resumen['subtotal_market'] + resumen['subtotal_cochera'],
+        'total_pagar': total_gral,
+        'saldo_pendiente': saldo_pend,
     }
 
 
@@ -291,6 +302,18 @@ class CheckOutCreateView(APIView):
         checkin = CheckIn.objects.select_related('habitacion', 'huesped', 'trabajador').get(pk=checkin_id)
         serializer = CheckOutCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        
+        # Validamos caja con iexact de forma idéntica a caja/views.py
+        caja_activa = Caja.objects.filter(
+            estado__iexact='ABIERTA'
+        ).order_by('-fecha_apertura', '-hora_apertura').first()
+        
+        if not caja_activa:
+            return Response(
+                {'error': 'No se puede procesar la salida porque no existe ninguna caja abierta en el sistema.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
         resumen = _calcular_resumen_checkin(checkin)
         checkout_data = {
             'subtotal_habitacion': resumen['subtotal_habitacion'],
@@ -301,25 +324,26 @@ class CheckOutCreateView(APIView):
             'metodo_pago': serializer.validated_data['metodo_pago'],
             'deuda_pendiente': max(resumen['total_general'] - _to_decimal(checkin.monto_pagado), Decimal('0')),
         }
+        
         checkout = CheckOutService().finalizar_alquiler(checkin_id, checkout_data, request.user)
-        caja_activa = Caja.objects.filter(estado=Caja.Estado.ABIERTA).order_by('-fecha_apertura', '-hora_apertura').first()
-        if caja_activa:
-            tipo_caja = checkout.metodo_pago if checkout.metodo_pago in {
-                MovimientoCaja.TipoCaja.EFECTIVO,
-                MovimientoCaja.TipoCaja.YAPE,
-                MovimientoCaja.TipoCaja.TARJETA,
-            } else MovimientoCaja.TipoCaja.EFECTIVO
-            MovimientoCaja.objects.create(
-                caja=caja_activa,
-                tipo=MovimientoCaja.Tipo.INGRESO,
-                tipo_caja=tipo_caja,
-                modulo=MovimientoCaja.Modulo.HOTEL,
-                referencia=f'Checkout #{checkin.id}',
-                monto=checkout.total_general,
-                descripcion=f'Cobro de salida de habitación {checkin.habitacion.numero}',
-            )
+        
+        # Registramos el cobro en la caja abierta
+        tipo_caja = checkout.metodo_pago if checkout.metodo_pago in {
+            MovimientoCaja.TipoCaja.EFECTIVO,
+            MovimientoCaja.TipoCaja.YAPE,
+            MovimientoCaja.TipoCaja.TARJETA,
+        } else MovimientoCaja.TipoCaja.EFECTIVO
+        
+        MovimientoCaja.objects.create(
+            caja=caja_activa,
+            tipo=MovimientoCaja.Tipo.INGRESO,
+            tipo_caja=tipo_caja,
+            modulo=MovimientoCaja.Modulo.HOTEL,
+            referencia=f'Checkout #{checkin.id}',
+            monto=checkout.deuda_pendiente, # Se cobra el saldo neto pendiente
+            descripcion=f'Cobro de salida de habitación {checkin.habitacion.numero}',
+        )
         return Response(CheckOutSerializer(checkout).data, status=status.HTTP_201_CREATED)
-
 
 class HealthHotelView(APIView):
     permission_classes = [IsAuthenticated]

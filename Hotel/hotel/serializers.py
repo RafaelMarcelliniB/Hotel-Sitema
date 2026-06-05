@@ -5,11 +5,40 @@ from hotel.models import CargoAdicional, CheckIn, CheckOut, Habitacion, Huesped,
 
 
 class HabitacionSerializer(BaseSerializer):
+    # 1. Campo declarado al nivel principal de la clase
+    checkin_actual_id = serializers.SerializerMethodField()
+
     class Meta:
         model = Habitacion
-        fields = '__all__'
+        fields = [
+            'id', 
+            'numero', 
+            'piso',
+            'tipo', 
+            'tarifa_dia', 
+            'tarifa_noche', 
+            'tarifa_madrugada',
+            'estado_ocupacion', 
+            'estado_limpieza', 
+            'checkin_actual_id'
+        ]
 
 
+    def get_checkin_actual_id(self, obj):
+        try:
+            from hotel.models import CheckIn
+            checkin_activo = CheckIn.objects.filter(
+                habitacion=obj, 
+                estado='ACTIVO'
+            ).first()
+            
+            if checkin_activo:
+                return checkin_activo.id
+            return None
+        except Exception as e:
+            print(f"⚠️ Error en serializer: {str(e)}")
+            return None
+            
 class HuespedSerializer(BaseSerializer):
     class Meta:
         model = Huesped
@@ -17,9 +46,49 @@ class HuespedSerializer(BaseSerializer):
 
 
 class CheckInSerializer(BaseSerializer):
+    # Declaramos los campos calculados dinámicos que espera el ModalCheckOut.jsx
+    huesped = HuespedSerializer(read_only=True)
+    monto_habitacion = serializers.SerializerMethodField()
+    monto_adicionales = serializers.SerializerMethodField()
+    total_pagar = serializers.SerializerMethodField()
+    saldo_pendiente = serializers.SerializerMethodField()
+
     class Meta:
         model = CheckIn
-        fields = '__all__'
+        # Traemos todos los campos originales del modelo y acoplamos los calculados
+        fields = [
+            'id', 'habitacion', 'huesped', 'turno_ingreso', 'tipo_pago', 
+            'monto_pagado', 'es_pareja', 'fecha_ingreso', 'hora_ingreso',
+            'fecha_salida_estimada', 'hora_salida_estimada', 'estado',
+            'monto_habitacion', 'monto_adicionales', 'total_pagar', 'saldo_pendiente'
+        ]
+
+    def get_monto_habitacion(self, obj):
+        # Si guardas el precio pactado en el check-in usas ese campo, 
+        # si no, recurrimos a la tarifa por día de la habitación asociada.
+        return float(getattr(obj, 'precio_pactado', getattr(obj.habitacion, 'tarifa_dia', 0.0)))
+
+    def get_monto_adicionales(self, obj):
+        try:
+            # Buscamos y sumamos todos los cargos adicionales vinculados a este check-in
+            from hotel.models import CargoAdicional
+            cargos = CargoAdicional.objects.filter(checkin=obj)
+            return float(sum(cargo.monto for cargo in cargos))
+        except Exception:
+            return 0.0
+
+    def get_total_pagar(self, obj):
+        # Total acumulado teórico = Costo Habitación + Cargos extras (Market, cochera, etc.)
+        costo_hab = self.get_monto_habitacion(obj)
+        costo_adi = self.get_monto_adicionales(obj)
+        return costo_hab + costo_adi
+
+    def get_saldo_pendiente(self, obj):
+        # Saldo Neto = Total acumulado - Lo que ya pagó en el ingreso (adelanto)
+        total = self.get_total_pagar(obj)
+        adelanto = float(obj.monto_pagado or 0.0)
+        saldo = total - adelanto
+        return max(0.0, saldo) # Evita que devuelva números negativos si pagó de más
 
 
 class CheckOutSerializer(BaseSerializer):
