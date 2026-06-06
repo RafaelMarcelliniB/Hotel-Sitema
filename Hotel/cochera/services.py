@@ -66,23 +66,29 @@ class RegistroVehiculoService(BaseService):
 
     @transaction.atomic
     def registrar_salida(self, registro_id):
-        
+        # 1. Obtener la instancia real del registro desde el repositorio
         registro = self.repository.get_by_id(registro_id)
         
         if registro.fecha_salida:
             raise ValueError("Este vehículo ya registró su salida.")
 
-        monto_total = self._calcular_monto(registro.tarifa_tipo, registro.fecha_entrada, registro.hora_entrada)
-
-        #Actualiza datos de salida en el registro
-        self.repository.update(
-            registro.id,
-            fecha_salida=timezone.now().date(),
-            hora_salida=timezone.now().time(),
-            monto_total=monto_total
+        # 2. Calcular el monto usando tu lógica de negocio
+        monto_calculado = self._calcular_monto(
+            registro.tarifa_tipo, 
+            registro.fecha_entrada, 
+            # Si hora_entrada es un objeto de tipo time, lo pasamos directo
+            registro.hora_entrada
         )
 
-        #Libera el espacio de cochera
+        # 3. Asignar los valores directamente sobre la instancia cargada en memoria
+        registro.fecha_salida = timezone.localdate()
+        registro.hora_salida = timezone.localtime().time()
+        registro.monto_total = monto_calculado
+        
+        # 4. Guardar los cambios directamente con .save() para asegurar persistencia transaccional inmediata
+        registro.save()
+
+        # 5. Liberar el espacio de cochera utilizando el repositorio correspondiente
         self.espacio_repo.update(registro.espacio.id, estado=EspacioCochera.Estado.LIBRE)
         
         return registro

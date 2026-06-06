@@ -16,6 +16,8 @@ class HuespedAdmin(admin.ModelAdmin):
 class CheckInAdmin(admin.ModelAdmin):
     list_display = ('habitacion', 'huesped', 'fecha_entrada', 'turno_ingreso', 'monto_pagado', 'estado')
     list_filter = ('estado', 'turno_ingreso', 'fecha_entrada')
+    # 👇 AGREGA ESTA LÍNEA AQUÍ
+    search_fields = ('habitacion__numero', 'huesped__nombre', 'huesped__apellido')
 
 @admin.register(CheckOut)
 class CheckOutAdmin(admin.ModelAdmin):

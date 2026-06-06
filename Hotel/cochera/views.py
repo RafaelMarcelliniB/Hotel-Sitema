@@ -54,18 +54,40 @@ class RegistroVehiculoSalidaView(APIView):
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, registro_id):
+        registro_obj = RegistroVehiculo.objects.filter(pk=registro_id).first()
+        
+        if not registro_obj:
+            return Response({"detail": "Registro no encontrado."}, status=status.HTTP_404_NOT_FOUND)
+            
+        # 🏨 ESCENARIO A: Si el vehículo está amarrado a un Check-In del hotel (Independiente de lo que diga el campo texto)
+        if registro_obj.checkin_vinculado_id is not None:
+            return Response(
+                {
+                    "detail": f"Este vehículo está vinculado al hospedaje de {registro_obj.nombre_conductor}. "
+                              f"Se liquidará, cobrará y liberará de manera automática durante su Check-Out en el módulo de Hotel."
+                }, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 👤 ESCENARIO B: Si NO tiene check-in vinculado (Es un cliente público de la calle real)
+        # Procesamos la salida y cálculo de horas/monto normal de cochera
         registro = RegistroVehiculoService().registrar_salida(registro_id)
+        metodo_pago = request.data.get('metodo_pago', MovimientoCaja.TipoCaja.EFECTIVO)
+        
         caja_activa = Caja.objects.filter(estado=Caja.Estado.ABIERTA).order_by('-fecha_apertura', '-hora_apertura').first()
+        
         if caja_activa:
             MovimientoCaja.objects.create(
                 caja=caja_activa,
                 tipo=MovimientoCaja.Tipo.INGRESO,
-                tipo_caja=MovimientoCaja.TipoCaja.EFECTIVO,
+                tipo_caja=metodo_pago,
                 modulo=MovimientoCaja.Modulo.COCHERA,
                 referencia=registro.placa,
-                monto=registro.monto_total,
-                descripcion=f'Salida de vehículo {registro.placa}',
+                monto=registro.monto_total,  # Monto real calculado por el servicio
+                descripcion=f'Salida de vehículo público - Placa: {registro.placa} | Cond: {registro.nombre_conductor}',
+                pagada=True
             )
+            
         return Response(_serializar_registro(registro))
 
 
