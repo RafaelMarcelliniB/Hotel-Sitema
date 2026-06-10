@@ -24,11 +24,20 @@ export default function TopBar() {
 
   return (
     <header className="flex items-center justify-between gap-4 border-b border-slate-200 bg-white px-6 py-4 sticky top-0 z-40">
-      <div>
-        <p className="text-sm text-slate-500">Bienvenido</p>
-        <h2 className="font-heading text-2xl font-semibold text-slate-900">
-          {user ? `${user.nombre} ${user.apellido}` : 'Usuario'}
-        </h2>
+      <div className="flex items-center gap-4">
+        {/* Hamburger for mobile */}
+        <button className="lg:hidden p-2 rounded-md text-slate-600 hover:bg-slate-100" onClick={() => { window.dispatchEvent(new CustomEvent('toggle-sidebar')) }} aria-label="Toggle sidebar">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+
+        <div>
+          <p className="text-sm text-slate-500">Bienvenido</p>
+          <h2 className="font-heading text-2xl font-semibold text-slate-900">
+            {user ? `${user.nombre} ${user.apellido}` : 'Usuario'}
+          </h2>
+        </div>
       </div>
       
       <div className="flex items-center gap-4">

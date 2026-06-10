@@ -70,32 +70,36 @@ class RegistroVehiculoService(BaseService):
 
     @transaction.atomic
     def registrar_salida(self, registro_id):
-        
+        # 1. Obtener la instancia real del registro desde el repositorio
         registro = self.repository.get_by_id(registro_id)
         
         if registro.fecha_salida:
             raise ValueError("Este vehículo ya registró su salida.")
+        # Calcular el monto usando la lógica de negocio
+        monto_calculado = self._calcular_monto(
+            registro.tarifa_tipo,
+            registro.fecha_entrada,
+            registro.hora_entrada,
+        )
 
-        monto_total = self._calcular_monto(registro.tarifa_tipo, registro.fecha_entrada, registro.hora_entrada)
-        # convertimos a Decimal para consistencia
+        # Convertir a Decimal por consistencia
         try:
             from decimal import Decimal
-            monto_total = Decimal(str(monto_total))
+            monto_calculado = Decimal(str(monto_calculado))
         except Exception:
             pass
 
-        #Actualiza datos de salida en el registro y obtenemos la instancia actualizada
-        registro_actualizado = self.repository.update(
-            registro.id,
-            fecha_salida=timezone.now().date(),
-            hora_salida=timezone.now().time(),
-            monto_total=monto_total
-        )
+        # Actualiza la instancia y persiste
+        registro.fecha_salida = timezone.localdate()
+        registro.hora_salida = timezone.localtime().time()
+        registro.monto_total = monto_calculado
+        registro.save()
 
-        #Libera el espacio de cochera
-        self.espacio_repo.update(registro_actualizado.espacio.id, estado=EspacioCochera.Estado.LIBRE)
-        
-        return registro_actualizado
+        # Libera el espacio de cochera
+        if getattr(registro, 'espacio', None):
+            self.espacio_repo.update(registro.espacio.id, estado=EspacioCochera.Estado.LIBRE)
+
+        return registro
     
     
 # ════════════════════════════════════════

@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
@@ -158,17 +160,31 @@ class CheckInService(BaseService):
         )
 
     def obtener_resumen(self, checkin):
+        from decimal import Decimal  # Aseguramos la importación
+        from cochera.services import RegistroVehiculoService
+        cochera_service = RegistroVehiculoService()
+
         cargos = checkin.cargos_adicionales.all()
-        ventas = getattr(checkin, 'ventas_market', None)
-        vehiculos = getattr(checkin, 'vehiculos', None)
-        subtotal_habitacion = self._tarifa_habitacion(checkin.habitacion, checkin.turno_ingreso)
-        subtotal_adicionales = sum((cargo.monto for cargo in cargos), 0)
-        subtotal_market = sum((venta.total for venta in checkin.ventas_market.all()), 0)
-        # Excluir cochera de huéspedes (no se les cobrará estacionamiento)
-        vehiculos_qs = checkin.vehiculos.all()
-        vehiculos_facturables = [v for v in vehiculos_qs if v.tipo_cliente != RegistroVehiculo.TipoCliente.HUESPED]
-        subtotal_cochera = sum((vehiculo.monto_total for vehiculo in vehiculos_facturables), 0)
+        subtotal_adicionales = sum((cargo.monto for cargo in cargos), Decimal('0'))
+        subtotal_market = sum((venta.total for venta in checkin.ventas_market.all()), Decimal('0'))
+        
+        # 🚗 CÁLCULO EN TIEMPO REAL DE COCHERA SIN INCOHERENCIA DE TIPOS:
+        subtotal_cochera = Decimal('0')
+        for vehiculo in checkin.vehiculos.all():
+            if vehiculo.fecha_salida is not None and vehiculo.monto_total is not None:
+                subtotal_cochera += Decimal(str(vehiculo.monto_total))
+            else:
+                try:
+                    monto_actual = cochera_service._calcular_monto(
+                        vehiculo.tarifa_tipo,
+                        vehiculo.fecha_entrada,
+                        vehiculo.hora_entrada
+                    )
+                    subtotal_cochera += Decimal(str(monto_actual))
+                except Exception:
+                    subtotal_cochera += Decimal(str(vehiculo.monto_total or 0))
         total_general = subtotal_habitacion + subtotal_adicionales + subtotal_market + subtotal_cochera
+        
         return {
             'subtotal_habitacion': subtotal_habitacion,
             'subtotal_adicionales': subtotal_adicionales,

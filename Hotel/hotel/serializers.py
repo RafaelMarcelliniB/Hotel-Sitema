@@ -1,11 +1,10 @@
 from rest_framework import serializers
-
+from django.db.models import Sum
+from decimal import Decimal
 from core.base_serializers import BaseSerializer
 from hotel.models import CargoAdicional, CheckIn, CheckOut, Habitacion, Huesped, Reserva
 
-
 class HabitacionSerializer(BaseSerializer):
-    # 1. Campo declarado al nivel principal de la clase
     checkin_actual_id = serializers.SerializerMethodField()
 
     class Meta:
@@ -23,20 +22,19 @@ class HabitacionSerializer(BaseSerializer):
             'checkin_actual_id'
         ]
 
-
     def get_checkin_actual_id(self, obj):
         try:
-            from hotel.models import CheckIn
+            # Filtramos de manera segura por el estado activo
             checkin_activo = CheckIn.objects.filter(
                 habitacion=obj, 
-                estado='ACTIVO'
+                estado=CheckIn.Estado.ACTIVO
             ).first()
             
             if checkin_activo:
                 return checkin_activo.id
             return None
         except Exception as e:
-            print(f"⚠️ Error en serializer: {str(e)}")
+            print(f"⚠️ Error en serializer Habitacion: {str(e)}")
             return None
             
 class HuespedSerializer(BaseSerializer):
@@ -46,7 +44,6 @@ class HuespedSerializer(BaseSerializer):
 
 
 class CheckInSerializer(BaseSerializer):
-    # Declaramos los campos calculados dinámicos que espera el ModalCheckOut.jsx
     huesped = HuespedSerializer(read_only=True)
     monto_habitacion = serializers.SerializerMethodField()
     monto_adicionales = serializers.SerializerMethodField()
@@ -55,40 +52,62 @@ class CheckInSerializer(BaseSerializer):
 
     class Meta:
         model = CheckIn
-        # Traemos todos los campos originales del modelo y acoplamos los calculados
+        # 🔥 Corregido: Se cambiaron fecha_ingreso/hora_ingreso por fecha_entrada/hora_entrada coincidiendo con tu modelo
         fields = [
             'id', 'habitacion', 'huesped', 'turno_ingreso', 'tipo_pago', 
-            'monto_pagado', 'es_pareja', 'fecha_ingreso', 'hora_ingreso',
+            'monto_pagado', 'es_pareja', 'fecha_entrada', 'hora_entrada',
             'fecha_salida_estimada', 'hora_salida_estimada', 'estado',
             'monto_habitacion', 'monto_adicionales', 'total_pagar', 'saldo_pendiente'
         ]
 
     def get_monto_habitacion(self, obj):
-        # Si guardas el precio pactado en el check-in usas ese campo, 
-        # si no, recurrimos a la tarifa por día de la habitación asociada.
-        return float(getattr(obj, 'precio_pactado', getattr(obj.habitacion, 'tarifa_dia', 0.0)))
+        # Aseguramos compatibilidad estricta con string o enum del ChoiceField
+        turno = str(obj.turno_ingreso).upper()
+        if 'DIA' in turno:
+            return float(obj.habitacion.tarifa_dia)
+        if 'NOCHE' in turno:
+            return float(obj.habitacion.tarifa_noche)
+        return float(obj.habitacion.tarifa_madrugada)
 
     def get_monto_adicionales(self, obj):
+        from decimal import Decimal
+        from django.db.models import Sum
+        from market.models import VentaMarket
+        from cochera.models import RegistroVehiculo
+
         try:
-            # Buscamos y sumamos todos los cargos adicionales vinculados a este check-in
-            from hotel.models import CargoAdicional
-            cargos = CargoAdicional.objects.filter(checkin=obj)
-            return float(sum(cargo.monto for cargo in cargos))
-        except Exception:
+            # 1. Cargos adicionales del hotel
+            sub_cargos = obj.cargos_adicionales.aggregate(total=Sum('monto'))['total']
+            sub_cargos = Decimal(str(sub_cargos)) if sub_cargos is not None else Decimal('0.00')
+
+            # 2. Ventas del market
+            sub_market = VentaMarket.objects.filter(checkin_vinculado=obj).aggregate(total=Sum('total'))['total']
+            sub_market = Decimal(str(sub_market)) if sub_market is not None else Decimal('0.00')
+            
+            # 3. Cochera (Controlamos estrictamente si no hay registros vinculados aún)
+            vehiculos_query = RegistroVehiculo.objects.filter(checkin_vinculado=obj)
+            if vehiculos_query.exists():
+                sub_cochera = vehiculos_query.aggregate(total=Sum('monto_total'))['total']
+                sub_cochera = Decimal(str(sub_cochera)) if sub_cochera is not None else Decimal('0.00')
+            else:
+                sub_cochera = Decimal('0.00')
+            
+            # Sumamos de forma limpia usando el mismo tipo de dato estricto (Decimal)
+            total_calculado = sub_cargos + sub_market + sub_cochera
+            return float(total_calculado)
+
+        except Exception as e:
+            # Si algo falla de todas formas, devolvemos un float compatible limpio para evitar el Error 500
+            print(f"Error interno en get_monto_adicionales: {e}")
             return 0.0
 
     def get_total_pagar(self, obj):
-        # Total acumulado teórico = Costo Habitación + Cargos extras (Market, cochera, etc.)
-        costo_hab = self.get_monto_habitacion(obj)
-        costo_adi = self.get_monto_adicionales(obj)
-        return costo_hab + costo_adi
+        return self.get_monto_habitacion(obj) + self.get_monto_adicionales(obj)
 
     def get_saldo_pendiente(self, obj):
-        # Saldo Neto = Total acumulado - Lo que ya pagó en el ingreso (adelanto)
         total = self.get_total_pagar(obj)
         adelanto = float(obj.monto_pagado or 0.0)
-        saldo = total - adelanto
-        return max(0.0, saldo) # Evita que devuelva números negativos si pagó de más
+        return max(0.0, total - adelanto)
 
 
 class CheckOutSerializer(BaseSerializer):
@@ -146,12 +165,3 @@ class ReservaLookupSerializer(serializers.Serializer):
 
 class HuespedBusquedaSerializer(serializers.Serializer):
     dni = serializers.CharField(required=False, allow_blank=True)
-
-# ════════════════════════════════════════
-# SOLID APLICADO EN ESTE ARCHIVO:
-# S - Single Responsibility: define la serialización de cada entidad del módulo hotel.
-# O - Open/Closed: nuevos serializers se agregan sin modificar los existentes.
-# L - Liskov Substitution: cada serializer hijo puede reemplazar a la base DRF esperada.
-# I - Interface Segregation: cada entidad tiene su propio serializer especializado.
-# D - Dependency Inversion: la API depende de BaseSerializer y no de ModelSerializer concreto.
-# ════════════════════════════════════════

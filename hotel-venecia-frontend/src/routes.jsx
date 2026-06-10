@@ -10,6 +10,7 @@ import Login from './pages/Login'
 import Market from './pages/Market'
 import NotFound from './pages/NotFound'
 import Recados from './pages/Recados'
+import Trabajadores from './pages/Trabajadores'
 
 export const router = createBrowserRouter([
   {
@@ -47,7 +48,7 @@ export const router = createBrowserRouter([
       },
       { 
         path: 'trabajadores', 
-        element: <ProtectedRoute allowedRoles={['admin']}><div>Página Trabajadores</div></ProtectedRoute> 
+        element: <ProtectedRoute allowedRoles={['admin']}><Trabajadores /></ProtectedRoute> 
       },
     ],
   },
