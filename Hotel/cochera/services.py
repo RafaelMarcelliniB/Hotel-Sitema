@@ -37,6 +37,10 @@ class RegistroVehiculoService(BaseService):
             return round(((int(horas) + (1 if horas % 1 else 0)) * tarifa_base), 2)
         return round(max(horas, 1) * tarifa_base, 2)
 
+    def calcular_monto_para_registro(self, registro_id):
+        registro = RegistroVehiculo.objects.get(pk=registro_id)
+        return self._calcular_monto(registro.tarifa_tipo, registro.fecha_entrada, registro.hora_entrada)
+
     @transaction.atomic
     def registrar_ingreso(self, vehiculo_data, trabajador):
         vehiculo_data = dict(vehiculo_data)
@@ -73,9 +77,15 @@ class RegistroVehiculoService(BaseService):
             raise ValueError("Este vehículo ya registró su salida.")
 
         monto_total = self._calcular_monto(registro.tarifa_tipo, registro.fecha_entrada, registro.hora_entrada)
+        # convertimos a Decimal para consistencia
+        try:
+            from decimal import Decimal
+            monto_total = Decimal(str(monto_total))
+        except Exception:
+            pass
 
-        #Actualiza datos de salida en el registro
-        self.repository.update(
+        #Actualiza datos de salida en el registro y obtenemos la instancia actualizada
+        registro_actualizado = self.repository.update(
             registro.id,
             fecha_salida=timezone.now().date(),
             hora_salida=timezone.now().time(),
@@ -83,9 +93,9 @@ class RegistroVehiculoService(BaseService):
         )
 
         #Libera el espacio de cochera
-        self.espacio_repo.update(registro.espacio.id, estado=EspacioCochera.Estado.LIBRE)
+        self.espacio_repo.update(registro_actualizado.espacio.id, estado=EspacioCochera.Estado.LIBRE)
         
-        return registro
+        return registro_actualizado
     
     
 # ════════════════════════════════════════

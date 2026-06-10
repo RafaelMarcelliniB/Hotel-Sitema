@@ -20,15 +20,18 @@ export function useHabitaciones() {
       return data
     },
     onSuccess: () => {
+      // Forzamos el refresco de los datos financieros del dashboard y de la caja abierta
       queryClient.invalidateQueries(['habitaciones'])
-      queryClient.invalidateQueries(['dashboard-metrics']) // Actualiza contadores del Dashboard
+      queryClient.invalidateQueries(['dashboard-metrics'])
+      queryClient.invalidateQueries(['caja-resumen'])
+      queryClient.invalidateQueries(['cajas'])
     }
   })
 
   return {
     ...query,
     habitaciones: query.data || [],
-    cambiarEstado: mutation.mutateAsync, // Cambiado a mutateAsync para mayor control
+    cambiarEstado: mutation.mutateAsync,
     isUpdating: mutation.isLoading
   }
 }

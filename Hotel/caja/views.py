@@ -119,22 +119,31 @@ class DashboardStatsView(APIView):
 
     def get(self, request):
         hoy = timezone.localdate()
-        cajas_de_hoy = Caja.objects.filter(fecha_apertura=hoy)
-        
-        # 1. Calcular Ingresos del Día basándose en las cajas del día de hoy
-        total_ingresos = 0
-        for caja in cajas_de_hoy:
-            if caja.estado.upper() == 'ABIERTA':
-                resumen_turno = CajaService().obtener_resumen(caja)
-                total_ingresos += float(resumen_turno.get('total_ingresos', 0))
-            else:
-                m_final = float(caja.monto_final or 0)
-                m_inicial = float(caja.monto_inicial or 0)
-                ingreso_turno = m_final - m_inicial
-                if ingreso_turno > 0:
-                    total_ingresos += ingreso_turno
 
-        caja_activa_existe = cajas_de_hoy.filter(estado__iexact='ABIERTA').exists()
+        # Calculamos rango de fecha/hora local para hoy y usamos intervalo [start, end)
+        from datetime import datetime, time, timedelta
+        start = timezone.make_aware(datetime.combine(hoy, time.min))
+        end = start + timedelta(days=1)
+
+        # Sumamos todos los movimientos reales de tipo INGRESO creados en el intervalo local de hoy
+        total_ingresos = MovimientoCaja.objects.filter(
+            fecha_hora__gte=start,
+            fecha_hora__lt=end,
+            tipo=MovimientoCaja.Tipo.INGRESO
+        ).aggregate(total=Sum('monto'))['total'] or 0
+
+        caja_activa_existe = Caja.objects.filter(fecha_apertura=hoy, estado__iexact='ABIERTA').exists()
+
+        # Sumatoria de totales de todas las cajas abiertas (independiente del día)
+        cajas_activas_qs = Caja.objects.filter(estado__iexact='ABIERTA')
+        suma_cajas_activas = 0
+        caja_service = CajaService()
+        for caja in cajas_activas_qs:
+            try:
+                resumen_caja = caja_service.obtener_resumen(caja)
+                suma_cajas_activas += float(resumen_caja.get('total_general', 0))
+            except Exception:
+                continue
 
         # 2. Estadísticas de Habitaciones
         total_habs = Habitacion.objects.count()
@@ -142,25 +151,8 @@ class DashboardStatsView(APIView):
         disponibles = Habitacion.objects.filter(estado_ocupacion='DISPONIBLE').exclude(estado_limpieza='SUCIO').count()
         limpieza = Habitacion.objects.filter(estado_limpieza='SUCIO').count()
 
-        # 3. ¡ENFOQUE DEFINITIVO!: Sumatoria global e histórica de deudas pendientes por alquileres activos
-        # Importamos de forma local para evitar importaciones circulares destructivas en Django
-        from hotel.models import CheckIn
-        
-        # Filtramos todos los check-ins que sigan en estado 'ACTIVO' en el hotel
-        checkins_activos = CheckIn.objects.filter(estado=CheckIn.Estado.ACTIVO)
-        
-        suma_deudas = 0
-        for checkin in checkins_activos:
-            # Sumamos el monto de la deuda inicial guardada en el check-in
-            suma_deudas += checkin.monto_deuda
-
-            # Opcional por SOLID: Si el cliente consume productos del market o adicionales durante su estadía 
-            # sin pagarlos al instante, se acumulan dinámicamente en su cuenta por cobrar histórica:
-            cargos_extra = checkin.cargos_adicionales.aggregate(total=Sum('monto')).get('total') or 0
-            ventas_market = getattr(checkin, 'ventas_market', None)
-            market_extra = checkin.ventas_market.aggregate(total=Sum('total')).get('total') or 0 if ventas_market else 0
-            
-            suma_deudas += (cargos_extra + market_extra)
+        # 3. Sumatoria global de deudas pendientes basada en movimientos tipo DEUDA no pagados
+        suma_deudas_mov = MovimientoCaja.objects.filter(tipo=MovimientoCaja.Tipo.DEUDA, pagada=False).aggregate(total=Sum('monto'))['total'] or 0
 
         return Response({
             "habitaciones": {
@@ -170,8 +162,9 @@ class DashboardStatsView(APIView):
                 "limpieza": limpieza
             },
             "ingresosDia": float(total_ingresos),
-            "cajaActiva": caja_activa_existe, 
-            "deudasPendientes": float(suma_deudas),  # Refleja con precisión absoluta tus S/ 80.00
+            "cajaActiva": caja_activa_existe,
+            "sumaCajasActivas": float(suma_cajas_activas),
+            "deudasPendientes": float(suma_deudas_mov),
             "proximosCheckouts": 0,
             "productosMasVendidos": []
         })

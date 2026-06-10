@@ -4,24 +4,15 @@ import Badge from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { useEspacios } from '../hooks/useEspacios'
 import Spinner from '../components/ui/Spinner'
-import ModalIngresoCochera from '../components/cochera/ModalIngresoCochera' // Lo crearemos abajo
+import ModalIngresoCochera from '../components/cochera/ModalIngresoCochera'
+import ModalSalidaCochera from '../components/cochera/ModalSalidaCochera' // <-- Importamos tu modal de salida
 
 export default function Cochera() {
-  const { espacios, isLoading, registrarSalida } = useEspacios()
+  const { espacios, isLoading } = useEspacios()
   const [selectedEspacio, setSelectedEspacio] = useState(null)
+  const [selectedEspacioSalida, setSelectedEspacioSalida] = useState(null) // <-- Nuevo estado para controlar la salida
 
   if (isLoading) return <Spinner />
-
-  const handleLiberar = async (id) => {
-    if (confirm("¿Desea procesar la salida y realizar el cobro?")) {
-      try {
-        await registrarSalida(id)
-        alert("Salida registrada correctamente")
-      } catch (err) {
-        alert("Error al procesar salida")
-      }
-    }
-  }
 
   return (
     <div className="p-6">
@@ -42,6 +33,13 @@ export default function Cochera() {
                 <div>
                   <p className="text-lg font-bold text-red-700 tracking-widest">{espacio.placa || 'PLACA-123'}</p>
                   <p className="text-xs text-slate-500">Ingreso: {espacio.hora_ingreso || '14:20 PM'}</p>
+                  {/* Mostrar tipo de cliente si existe el registro actual */}
+                  {espacio.vehiculo_actual?.tipo_cliente && (
+                    <p className="text-xs mt-1">
+                      <span className="font-semibold">Cliente:</span>{' '}
+                      {espacio.vehiculo_actual.tipo_cliente === 'HUESPED' ? 'Huésped' : 'Público'}
+                    </p>
+                  )}
                 </div>
               ) : (
                 <p className="text-sm text-slate-500">Disponible para {espacio.tipo}</p>
@@ -54,7 +52,12 @@ export default function Cochera() {
                   Registrar Ingreso
                 </Button>
               ) : (
-                <Button variant="outline" className="w-full text-red-600 border-red-200" onClick={() => handleLiberar(espacio.id)}>
+                /* CORREGIDO: Ya no ejecuta handleLiberar. Ahora setea el estado para abrir tu modal */
+                <Button 
+                  variant="outline" 
+                  className="w-full text-red-600 border-red-200 hover:bg-red-50" 
+                  onClick={() => setSelectedEspacioSalida(espacio)}
+                >
                   Procesar Salida
                 </Button>
               )}
@@ -63,10 +66,19 @@ export default function Cochera() {
         ))}
       </div>
 
+      {/* MODAL INGRESO */}
       {selectedEspacio && (
         <ModalIngresoCochera 
           espacio={selectedEspacio} 
           onClose={() => setSelectedEspacio(null)} 
+        />
+      )}
+
+      {/* MODAL SALIDA (Agregado para que pinte en pantalla) */}
+      {selectedEspacioSalida && (
+        <ModalSalidaCochera 
+          espacio={selectedEspacioSalida} 
+          onClose={() => setSelectedEspacioSalida(null)} 
         />
       )}
     </div>

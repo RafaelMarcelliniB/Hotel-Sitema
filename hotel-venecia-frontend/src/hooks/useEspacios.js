@@ -8,36 +8,38 @@ export function useEspacios() {
   const query = useQuery({
     queryKey: ['espacios'],
     queryFn: getEspacios,
-    refetchInterval: 30000 // Refresco automático cada 30 segundos
+    refetchInterval: 15000 // Refresco cada 15 segundos
   })
 
   const registrarIngreso = useMutation({
     mutationFn: async (datos) => {
-      const { data } = await api.post('/cochera/ingresos/', datos)
+      const { data } = await api.post('/cochera/vehiculos/ingreso/', datos) 
       return data
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['espacios'])
-      queryClient.invalidateQueries(['dashboard-metrics']) // Sincroniza el Dashboard
+      queryClient.invalidateQueries(['dashboard-metrics'])
     }
   })
 
   const registrarSalida = useMutation({
-    mutationFn: async (idEspacio) => {
-      const { data } = await api.post(`/cochera/espacios/${idEspacio}/salida/`)
+    mutationFn: async ({ registroId, metodo_pago }) => {
+      const payload = metodo_pago ? { metodo_pago } : {}
+      const { data } = await api.patch(`/cochera/vehiculos/${registroId}/salida/`, payload)
       return data
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['espacios'])
-      queryClient.invalidateQueries(['dashboard-metrics']) // Sincroniza el Dashboard
+      queryClient.invalidateQueries(['dashboard-metrics'])
+      queryClient.invalidateQueries(['caja-resumen']) // Actualiza tus finanzas en tiempo real
     }
   })
 
   return {
     ...query,
     espacios: query.data || [],
-    registrarIngreso: registrarIngreso.mutateAsync,
-    registrarSalida: registrarSalida.mutateAsync,
-    isMutating: registrarIngreso.isLoading || registrarSalida.isLoading // Agrega estado de carga
+    registrarIngreso: registrarIngreso.mutateAsync, // Retorna la función directa
+    registrarSalida: registrarSalida.mutateAsync,   // Retorna la función directa
+    isMutating: registrarIngreso.isLoading || registrarSalida.isLoading
   }
 }

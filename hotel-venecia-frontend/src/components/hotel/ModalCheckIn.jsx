@@ -64,17 +64,28 @@ export default function ModalCheckIn({ habitacion, onClose, onSuccess }) {
 
       // Cuerpo de datos mapeado uno a uno con CheckInCreateSerializer de Django
       const payload = {
-        habitacion_id: habitacion.id,
-        turno_ingreso: turnoIngreso,
-        tipo_pago: tipoPago,
-        monto_pagado: parseFloat(montoPagado),
-        es_pareja: esPareja,
-        huesped: huesped
-      };
+      turno_ingreso: turnoIngreso,
+      tipo_pago: tipoPago,
+      monto_pagado: parseFloat(montoPagado) || 0.00, // Forzar cast flotante limpio
+      es_pareja: !!esPareja,
+      habitacion_id: parseInt(habitacion.id, 10),
+      // Encapsular los campos del estado del huésped en su propio nodo
+      huesped: {
+        nombre: huesped.nombre,
+        apellido: huesped.apellido,
+        dni_pasaporte: huesped.dni_pasaporte,
+        telefono: huesped.telefono,
+        ciudad_origen: huesped.ciudad_origen,
+        nacionalidad: huesped.nacionalidad || 'PERU',
+        estado_civil: huesped.estado_civil || 'SOLTERO',
+        tipo_visita: huesped.tipo_visita || 'INDEPENDIENTE'
+      }
+    };
 
-      await api.post('/hotel/checkin/', payload);
+    // Despachar la petición con la estructura anidada requerida por DRF
+    const response = await api.post('/hotel/checkin/', payload);
       
-      onSuccess(); // Actualiza el mapa de cuartos
+      onSuccess(); // Actualiza el mapa de cuartos, contadores, caja y dashboard automáticamente
     } catch (err) {
       console.error("Error en el Check-in:", err);
       const errorServer = err.response?.data?.error || "Error al registrar el ingreso. Verifique que la caja esté abierta.";

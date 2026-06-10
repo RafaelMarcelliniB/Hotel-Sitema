@@ -39,4 +39,24 @@ api.interceptors.request.use(
   }
 )
 
+// Interceptor de respuestas: si la API responde 401 avisamos y redirigimos al login
+api.interceptors.response.use(
+  (resp) => resp,
+  (error) => {
+    const status = error.response?.status
+    if (status === 401) {
+      try {
+        // Limpieza del token local y redirección a la pantalla de login
+        localStorage.removeItem('hotel_auth_store')
+        localStorage.removeItem('hotel_token')
+      } catch (e) {}
+      // Mostrar mensaje amigable
+      alert('Sesión expirada o no autorizada. Por favor vuelve a iniciar sesión.')
+      // Redirigir a la ruta raíz (ajusta si tu app usa otra ruta de login)
+      window.location.href = '/'
+    }
+    return Promise.reject(error)
+  }
+)
+
 export default api

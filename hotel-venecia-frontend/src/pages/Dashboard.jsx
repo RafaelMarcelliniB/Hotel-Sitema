@@ -46,8 +46,8 @@ export default function Dashboard() {
         <Card className="border-l-4 border-l-green-500">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Ingresos del Día</p>
           <h3 className="mt-2 text-4xl font-black text-green-600">
-            S/ {typeof data.ingresosDia === 'number' ? data.ingresosDia.toFixed(2) : '0.00'}
-          </h3>
+              S/ {typeof (data.sumaCajasActivas ?? data.ingresosDia) === 'number' ? (data.sumaCajasActivas ?? data.ingresosDia).toFixed(2) : '0.00'}
+            </h3>
           <div className="mt-2 text-xs font-medium">
             {data.cajaActiva ? (
               <span className="text-green-600 flex items-center gap-1">

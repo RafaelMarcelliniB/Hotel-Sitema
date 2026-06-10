@@ -44,14 +44,21 @@ export default function ModalCheckOut({ habitacion, onClose, onSuccess }) {
 
     try {
       setLoading(true);
-      // Enviamos el método de pago al endpoint de checkout
+      
+      // POST al endpoint correcto de checkout
       await api.post(`/hotel/checkout/${checkinId}/`, {
         metodo_pago: metodoPago
       });
       
-      onSuccess(); // Recarga el mapa de habitaciones
+      alert("Check-out procesado correctamente. Habitación liberada.");
+      
+      if (onSuccess) {
+        onSuccess(); // Esto gatilla useHabitaciones y refresca los datos de caja/dashboard
+      }
+      
       onClose();   // Cierra el modal
     } catch (err) {
+      console.error("Error al procesar el check-out:", err);
       const errorMsg = err.response?.data?.error || "Error al procesar la salida.";
       alert(errorMsg);
     } finally {
@@ -102,20 +109,32 @@ export default function ModalCheckOut({ habitacion, onClose, onSuccess }) {
             
             <div className="flex justify-between text-sm">
               <span className="text-slate-600">Alquiler de Habitación</span>
-              <span className="font-bold">S/ {datosSalida?.monto_habitacion || '0.00'}</span>
+              {/* Mostrar solo el saldo restante de la habitación (no volver a cobrar lo ya pagado) */}
+              <span className="font-bold">S/ {(Math.max((Number(datosSalida?.monto_habitacion || 0) - Number(datosSalida?.monto_pagado || 0)), 0)).toFixed(2)}</span>
             </div>
 
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-600">Consumos / Adicionales</span>
-              <span className="font-bold text-blue-600">S/ {datosSalida?.monto_adicionales || '0.00'}</span>
-            </div>
+            {/* VEHÍCULO VINCULADO (si existe) */}
+            {datosSalida?.vehiculos_cochera && datosSalida.vehiculos_cochera.length > 0 && (
+              <div className="space-y-2 p-3 bg-slate-50 rounded">
+                <h5 className="text-xs font-bold text-slate-600">Vehículo registrado en cochera</h5>
+                {datosSalida.vehiculos_cochera.map((v) => (
+                  <div key={v.id} className="text-sm flex justify-between">
+                    <div>
+                      <div className="font-semibold">{v.placa} {v.tipo_cliente === 'HUESPED' ? '(Huésped)' : ''}</div>
+                      <div className="text-xs text-slate-500">{v.tipo_vehiculo} • Espacio #{v.espacio_numero || 'N/A'}</div>
+                    </div>
+                    <div className="font-bold">S/ {v.monto_total || '0.00'}</div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <hr className="border-dashed" />
 
             <div className="flex justify-between items-baseline">
               <span className="text-lg font-bold text-slate-900">TOTAL A PAGAR:</span>
               <span className="text-2xl font-black text-slate-900">
-                S/ {datosSalida?.total_pagar || '0.00'}
+                S/ {(Number(datosSalida?.saldo_pendiente || 0)).toFixed(2)}
               </span>
             </div>
 

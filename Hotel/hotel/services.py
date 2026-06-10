@@ -1,10 +1,15 @@
 from django.db import transaction
 from django.utils import timezone
+from decimal import Decimal
 
 from core.base_services import BaseService
 from users.models import AuditLog
 from hotel.models import CargoAdicional, CheckIn, Habitacion
 from hotel.repositories import CargoAdicionalRepository, CheckInRepository, CheckOutRepository, HabitacionRepository, HuespedRepository, ReservaRepository
+
+# IMPORTACIONES AÑADIDAS: Necesarias para interactuar con el saldo del dashboard y la caja activa
+from caja.models import Caja, MovimientoCaja
+from cochera.models import RegistroVehiculo
 
 
 class HabitacionService(BaseService):
@@ -74,11 +79,11 @@ class CheckInService(BaseService):
 
         huesped = self._obtener_huesped(data)
         turno_ingreso = data.get('turno_ingreso')
-        monto_pagado = data.get('monto_pagado', 0)
-        tarifa = self._tarifa_habitacion(habitacion, turno_ingreso)
-        monto_deuda = max(tarifa - monto_pagado, 0)
+        monto_pagado = Decimal(str(data.get('monto_pagado', 0)))
+        tarifa = Decimal(str(self._tarifa_habitacion(habitacion, turno_ingreso)))
+        monto_deuda = max(tarifa - monto_pagado, Decimal('0'))
 
-        #Crea el Check-In
+        # Crea el Check-In
         checkin = self.repository.create(
             habitacion=habitacion,
             huesped=huesped,
@@ -94,8 +99,44 @@ class CheckInService(BaseService):
             es_pareja=data.get('es_pareja', False),
         )
 
-        #Actualiza estado de habitación 
+        # Actualiza estado de habitación 
         self.habitacion_repo.update(habitacion.id, estado_ocupacion=Habitacion.EstadoOcupacion.OCUPADO)
+
+        # =====================================================================
+        # INYECCIÓN AUTOMÁTICA EN CAJA (SOLUCIÓN AL BALANCE DEL DASHBOARD)
+        # =====================================================================
+        if monto_pagado > 0:
+            # Buscamos la caja que se encuentre abierta para este trabajador
+            caja_activa = Caja.objects.filter(trabajador=trabajador, estado='ABIERTA').first()
+            if not caja_activa:
+                # Fallback: Si no tiene una asignada directamente, tomamos la última caja global abierta
+                caja_activa = Caja.objects.filter(estado='ABIERTA').last()
+
+            if caja_activa:
+                # Mapear el tipo de pago recibido al campo `tipo_caja` del modelo MovimientoCaja
+                tipo_pago = data.get('tipo_pago') or data.get('metodo_pago')
+                tipo_caja_val = None
+                if tipo_pago:
+                    tipo_map = {
+                        'EFECTIVO': MovimientoCaja.TipoCaja.EFECTIVO,
+                        'YAPE': MovimientoCaja.TipoCaja.YAPE,
+                        'TARJETA': MovimientoCaja.TipoCaja.TARJETA,
+                        'efectivo': MovimientoCaja.TipoCaja.EFECTIVO,
+                        'yape': MovimientoCaja.TipoCaja.YAPE,
+                        'tarjeta': MovimientoCaja.TipoCaja.TARJETA,
+                    }
+                    tipo_caja_val = tipo_map.get(tipo_pago, MovimientoCaja.TipoCaja.EFECTIVO)
+
+                MovimientoCaja.objects.create(
+                    caja=caja_activa,
+                    monto=monto_pagado,
+                    tipo=MovimientoCaja.Tipo.INGRESO,
+                    tipo_caja=tipo_caja_val or MovimientoCaja.TipoCaja.EFECTIVO,
+                    modulo=MovimientoCaja.Modulo.HOTEL,
+                    referencia=f'Pago Adelantado Check-in #{checkin.id}',
+                    descripcion=f"Pago Adelantado Hab #{habitacion.numero} - Huésped: {huesped.nombre} {huesped.apellido}",
+                    pagada=True
+                )
 
         AuditLog.objects.create(
             trabajador=trabajador,
@@ -113,7 +154,7 @@ class CheckInService(BaseService):
             monto=data['monto'],
             fecha=timezone.localdate(),
             hora=timezone.localtime().time(),
-            trabajador=trabajador,
+            worker=trabajador,
         )
 
     def obtener_resumen(self, checkin):
@@ -123,7 +164,10 @@ class CheckInService(BaseService):
         subtotal_habitacion = self._tarifa_habitacion(checkin.habitacion, checkin.turno_ingreso)
         subtotal_adicionales = sum((cargo.monto for cargo in cargos), 0)
         subtotal_market = sum((venta.total for venta in checkin.ventas_market.all()), 0)
-        subtotal_cochera = sum((vehiculo.monto_total for vehiculo in checkin.vehiculos.all()), 0)
+        # Excluir cochera de huéspedes (no se les cobrará estacionamiento)
+        vehiculos_qs = checkin.vehiculos.all()
+        vehiculos_facturables = [v for v in vehiculos_qs if v.tipo_cliente != RegistroVehiculo.TipoCliente.HUESPED]
+        subtotal_cochera = sum((vehiculo.monto_total for vehiculo in vehiculos_facturables), 0)
         total_general = subtotal_habitacion + subtotal_adicionales + subtotal_market + subtotal_cochera
         return {
             'subtotal_habitacion': subtotal_habitacion,
@@ -144,16 +188,14 @@ class CheckOutService(BaseService):
         
         checkin = checkin_repo.get_by_id(checkin_id)
 
-        #Cálculo del consumo total ya viene del modelo/vistas, 
-        # aquí registramos el fin del proceso.
         checkout = self.repository.create(checkin=checkin, trabajador_checkout=trabajador, **checkout_data)
 
-        #Actualiza Check-In
+        # Actualiza Check-In
         checkin_repo.update(checkin.id, estado=CheckIn.Estado.CERRADO, 
                             fecha_salida_real=timezone.now().date(),
                             hora_salida_real=timezone.now().time())
 
-        #Libera habitación y marcarla para limpieza (Estado SUCIO)
+        # Libera habitación y marcarla para limpieza (Estado SUCIO)
         habitacion_repo.update(checkin.habitacion.id, 
                                 estado_ocupacion=Habitacion.EstadoOcupacion.DISPONIBLE,
                                 estado_limpieza=Habitacion.EstadoLimpieza.SUCIO)
