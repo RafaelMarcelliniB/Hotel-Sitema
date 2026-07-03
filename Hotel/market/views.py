@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 from django.utils import timezone
 import traceback
 
+from caja.permissions import CajaAbertaPermission
 from market.models import IngresoMercaderia, Producto, VentaMarket
 from market.serializers import (
 	IngresoMercaderiaCreateSerializer,
@@ -87,7 +88,7 @@ class IngresoMercaderiaViewSet(viewsets.ModelViewSet):
 class VentaMarketViewSet(viewsets.ModelViewSet):
 	queryset = VentaMarket.objects.select_related('trabajador', 'checkin_vinculado').prefetch_related('detalles', 'detalles__producto').order_by('-fecha', '-hora')
 	serializer_class = VentaMarketSerializer
-	permission_classes = [IsAuthenticated]
+	permission_classes = [IsAuthenticated, CajaAbertaPermission]
 
 	def get_queryset(self):
 		queryset = super().get_queryset()

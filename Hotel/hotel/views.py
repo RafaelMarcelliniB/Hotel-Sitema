@@ -12,8 +12,10 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.exceptions import ValidationError
 
 from caja.models import Caja, MovimientoCaja
+from users.models import Trabajador
 from cochera.models import RegistroVehiculo
 from cochera.services import RegistroVehiculoService
 from hotel.models import CargoAdicional, CheckIn, CheckOut, Habitacion, Huesped, Reserva
@@ -46,9 +48,25 @@ def _to_decimal(value):
 
 def _caja_activa(user):
     """Auxiliar para obtener la caja abierta del trabajador actual."""
+    hoy = timezone.localdate()
+    turno_usuario = getattr(user, 'turno', None)
+
+    filtros = {
+        'trabajador': user,
+        'estado': Caja.Estado.ABIERTA,
+        'fecha_apertura': hoy,
+    }
+    if turno_usuario:
+        filtros['turno'] = turno_usuario
+
+    caja = Caja.objects.filter(**filtros).order_by('-fecha_apertura', '-hora_apertura').first()
+    if caja:
+        return caja
+
     return Caja.objects.filter(
         trabajador=user,
-        estado__iexact='ABIERTA'
+        estado=Caja.Estado.ABIERTA,
+        fecha_apertura=hoy,
     ).order_by('-fecha_apertura', '-hora_apertura').first()
 
 
@@ -305,20 +323,22 @@ class CheckInCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        # 🔒 BLOQUEO DE SEGURIDAD: Validar que empleado tenga caja abierta
+        if hasattr(request.user, 'rol') and request.user.rol != Trabajador.Rol.ADMIN:
+            caja_existe = _caja_activa(request.user) is not None
+            if not caja_existe:
+                raise ValidationError(
+                    "Debe aperturar su caja de turno antes de realizar esta operación."
+                )
+        
         serializer = CheckInCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         caja_activa = _caja_activa(request.user)
 
-        # Si el trabajador no tiene caja, intentamos usar cualquier caja abierta en el sistema
-        if not caja_activa:
-            caja_activa = Caja.objects.filter(
-                estado__iexact='ABIERTA'
-            ).order_by('-fecha_apertura', '-hora_apertura').first()
-
         if not caja_activa:
             return Response(
-                {'error': 'No se puede realizar el check-in porque no existe ninguna caja abierta en el sistema.'},
+                {'error': 'No se puede realizar el check-in porque no existe una caja abierta para tu usuario/turno actual.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -329,25 +349,13 @@ class CheckInCreateView(APIView):
         total_habitacion = tarifa - descuento
         monto_pagado = _to_decimal(serializer.validated_data.get('monto_pagado', 0))
 
-        if monto_pagado > 0:
-            metodo_pago_raw = serializer.validated_data.get('tipo_pago', 'EFECTIVO').upper()
-            tipo_caja = metodo_pago_raw if metodo_pago_raw in [MovimientoCaja.TipoCaja.EFECTIVO, MovimientoCaja.TipoCaja.YAPE, MovimientoCaja.TipoCaja.TARJETA] else MovimientoCaja.TipoCaja.EFECTIVO
-
-            MovimientoCaja.objects.create(
-                caja=caja_activa,
-                tipo=MovimientoCaja.Tipo.INGRESO,
-                tipo_caja=tipo_caja,
-                modulo=MovimientoCaja.Modulo.HOTEL,
-                referencia=f'Check-in #{checkin.id}',
-                monto=monto_pagado,
-                descripcion=f'Pago adelantado check-in hab. {checkin.habitacion.numero} - Huésped: {checkin.huesped.nombre}',
-                pagada=True
-            )
-
         saldo_restante = total_habitacion - monto_pagado
         if saldo_restante > 0:
             MovimientoCaja.objects.create(
                 caja=caja_activa,
+                trabajador=caja_activa.trabajador,
+                turno=caja_activa.turno,
+                bloqueado=False,
                 tipo=MovimientoCaja.Tipo.DEUDA,
                 tipo_caja=MovimientoCaja.TipoCaja.EFECTIVO,
                 modulo=MovimientoCaja.Modulo.HOTEL,
@@ -415,6 +423,9 @@ class CheckOutCreateView(APIView):
 
             MovimientoCaja.objects.create(
                 caja=caja_activa,
+                trabajador=caja_activa.trabajador,
+                turno=caja_activa.turno,
+                bloqueado=False,
                 tipo=MovimientoCaja.Tipo.INGRESO,
                 tipo_caja=tipo_caja,
                 monto=monto_movimiento,

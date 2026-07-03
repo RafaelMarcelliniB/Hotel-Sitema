@@ -11,10 +11,52 @@ from cochera.models import EspacioCochera
 from hotel.models import CheckIn, Habitacion, Reserva
 from market.models import Producto
 from recados.models import Recado
+from users.models import Trabajador
 
 
 class DashboardView(APIView):
     permission_classes = [IsAuthenticated]
+
+    def _obtener_caja_activa(self, user):
+        """
+        Busca la caja abierta del usuario actual.
+        
+        Retorna: Objeto Caja con estado='ABIERTA' o None
+        """
+        return Caja.objects.filter(
+            trabajador=user,
+            estado=Caja.Estado.ABIERTA
+        ).order_by('-fecha_apertura', '-hora_apertura').first()
+
+    def _es_empleado(self, user):
+        """Verifica si el usuario es Cajero o Recepcionista"""
+        return user.rol in [Trabajador.Rol.CAJERO, Trabajador.Rol.RECEPCIONISTA]
+
+    def _es_admin(self, user):
+        """Verifica si el usuario es Administrador"""
+        return user.rol == Trabajador.Rol.ADMIN
+
+    def _obtener_movimientos_filtrados(self, request, hoy):
+        """
+        Retorna los movimientos de caja filtrados según el rol del usuario.
+        
+        - ADMIN: todos los movimientos del día
+        - EMPLEADO CON CAJA ABIERTA: solo movimientos de su caja activa
+        - EMPLEADO SIN CAJA: conjunto vacío (sin movimientos)
+        """
+        if self._es_admin(request.user):
+            # Admin ve todos los movimientos del día
+            return MovimientoCaja.objects.filter(fecha_hora__date=hoy).order_by('-fecha_hora')
+        
+        # Para empleados, buscamos su caja activa
+        caja_activa = self._obtener_caja_activa(request.user)
+        
+        if caja_activa:
+            # Si existe caja abierta, filtramos por esa caja específicamente
+            return MovimientoCaja.objects.filter(caja=caja_activa).order_by('-fecha_hora')
+        
+        # Si no hay caja abierta, retornamos un queryset vacío
+        return MovimientoCaja.objects.none()
 
     def get(self, request):
         hoy = timezone.localdate()
@@ -22,20 +64,29 @@ class DashboardView(APIView):
         checkins_activos = CheckIn.objects.filter(estado=CheckIn.Estado.ACTIVO).select_related('habitacion', 'huesped')
         reservas_hoy = Reserva.objects.filter(fecha_llegada_estimada=hoy).select_related('huesped', 'habitacion_preferida')
         productos_stock_bajo = Producto.objects.filter(activo=True, stock_actual__lte=F('stock_minimo')).order_by('nombre')
-        movimientos_hoy = MovimientoCaja.objects.filter(fecha_hora__date=hoy).order_by('-fecha_hora')
-        pagos_hoy = MovimientoCaja.objects.filter(fecha_hora__date=hoy, tipo=MovimientoCaja.Tipo.INGRESO)
+        
+        # Aplicar filtrado de movimientos según el rol del usuario
+        movimientos_hoy = self._obtener_movimientos_filtrados(request, hoy)
+        pagos_hoy = movimientos_hoy.filter(tipo=MovimientoCaja.Tipo.INGRESO)
 
         ingresos_hotel = movimientos_hoy.filter(modulo=MovimientoCaja.Modulo.HOTEL, tipo=MovimientoCaja.Tipo.INGRESO).aggregate(total=Sum('monto')).get('total') or Decimal('0')
         ingresos_market = movimientos_hoy.filter(modulo=MovimientoCaja.Modulo.MARKET, tipo=MovimientoCaja.Tipo.INGRESO).aggregate(total=Sum('monto')).get('total') or Decimal('0')
         ingresos_cochera = movimientos_hoy.filter(modulo=MovimientoCaja.Modulo.COCHERA, tipo=MovimientoCaja.Tipo.INGRESO).aggregate(total=Sum('monto')).get('total') or Decimal('0')
         total_ingresos = ingresos_hotel + ingresos_market + ingresos_cochera
 
-        deudas_qs = MovimientoCaja.objects.filter(tipo=MovimientoCaja.Tipo.DEUDA, pagada=False)
-        deudas_total = deudas_qs.aggregate(total=Sum('monto')).get('total') or Decimal('0')
+        # ════════════════════════════════════════════════════════════════════════════════════════
+        # 🔧 DISEÑO REDISEÑADO - DASHBOARD SOLAMENTE CON INGRESOS REALES:
+        # ════════════════════════════════════════════════════════════════════════════════════════
+        # CAMBIO ARQUITECTÓNICO:
+        # - Se elimina completamente la tarjeta "Deudas Pendientes" del Dashboard del Admin
+        # - Los registros tipo='DEUDA' pertenecen ÚNICAMENTE al control de caja del recepcionista
+        # - Las métricas financieras del Admin SOLO suman MovimientoCaja con tipo='INGRESO'
+        # - Esto simplifica el Dashboard y elimina distorsiones en las métricas globales
+        # ════════════════════════════════════════════════════════════════════════════════════════
 
-        pagos_efectivo = pagos_hoy.filter(tipo_caja=MovimientoCaja.TipoCaja.EFECTIVO).aggregate(total=Sum('monto')).get('total') or Decimal('0')
-        pagos_yape = pagos_hoy.filter(tipo_caja=MovimientoCaja.TipoCaja.YAPE).aggregate(total=Sum('monto')).get('total') or Decimal('0')
-        pagos_tarjeta = pagos_hoy.filter(tipo_caja=MovimientoCaja.TipoCaja.TARJETA).aggregate(total=Sum('monto')).get('total') or Decimal('0')
+        pagos_efectivo = pagos_hoy.filter(tipo_caja=MovimientoCaja.TipoCaja.EFECTIVO, tipo=MovimientoCaja.Tipo.INGRESO).aggregate(total=Sum('monto')).get('total') or Decimal('0')
+        pagos_yape = pagos_hoy.filter(tipo_caja=MovimientoCaja.TipoCaja.YAPE, tipo=MovimientoCaja.Tipo.INGRESO).aggregate(total=Sum('monto')).get('total') or Decimal('0')
+        pagos_tarjeta = pagos_hoy.filter(tipo_caja=MovimientoCaja.TipoCaja.TARJETA, tipo=MovimientoCaja.Tipo.INGRESO).aggregate(total=Sum('monto')).get('total') or Decimal('0')
 
         return Response({
             'habitaciones': {
@@ -50,10 +101,6 @@ class DashboardView(APIView):
                 'market': ingresos_market,
                 'cochera': ingresos_cochera,
                 'total': total_ingresos,
-            },
-            'deudas_pendientes': {
-                'cantidad': deudas_qs.count() + checkins_activos.filter(monto_deuda__gt=0).count(),
-                'total': deudas_total + (checkins_activos.aggregate(total=Sum('monto_deuda')).get('total') or Decimal('0')),
             },
             'checkouts_proximos': [
                 {
@@ -108,7 +155,7 @@ class DashboardView(APIView):
             ],
             'resumen': {
                 'habitaciones': habitaciones.count(),
-                'recados_no_leidos': Recado.objects.filter(leido=False).count(),
+                'recados_no_leidos': Recado.objects.exclude(estado=Recado.Estado.RESUELTO).count(),
                 'cajas_abiertas': Caja.objects.filter(estado=Caja.Estado.ABIERTA).count(),
                 'espacios_libres': EspacioCochera.objects.filter(estado=EspacioCochera.Estado.LIBRE).count(),
             },

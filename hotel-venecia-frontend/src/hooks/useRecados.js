@@ -8,7 +8,7 @@ export function useRecados() {
   const query = useQuery({
     queryKey: ['recados'],
     queryFn: getRecados,
-    refetchInterval: 60000 // Se actualiza cada minuto para ver recados nuevos
+    refetchInterval: 60000,
   })
 
   const crearRecado = useMutation({
@@ -16,7 +16,15 @@ export function useRecados() {
       const { data } = await api.post('/recados/', nuevoRecado)
       return data
     },
-    onSuccess: () => queryClient.invalidateQueries(['recados'])
+    onSuccess: () => queryClient.invalidateQueries(['recados']),
+  })
+
+  const actualizarEstado = useMutation({
+    mutationFn: async ({ id, estado }) => {
+      const { data } = await api.patch(`/recados/${id}/`, { estado })
+      return data
+    },
+    onSuccess: () => queryClient.invalidateQueries(['recados']),
   })
 
   const marcarLeido = useMutation({
@@ -24,13 +32,19 @@ export function useRecados() {
       const { data } = await api.patch(`/recados/${id}/leer/`)
       return data
     },
-    onSuccess: () => queryClient.invalidateQueries(['recados'])
+    onSuccess: (data) => {
+      queryClient.setQueryData(['recados'], (oldData = []) => {
+        if (!Array.isArray(oldData)) return oldData
+        return oldData.map((item) => (item.id === data.id ? data : item))
+      })
+    },
   })
 
   return {
     ...query,
     recados: query.data || [],
     crearRecado: crearRecado.mutateAsync,
-    marcarLeido: marcarLeido.mutateAsync
+    actualizarEstado: actualizarEstado.mutateAsync,
+    marcarLeido: marcarLeido.mutateAsync,
   }
 }

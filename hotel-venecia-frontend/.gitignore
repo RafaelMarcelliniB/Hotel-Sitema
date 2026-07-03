@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Bloquear entornos virtuales en todo el proyecto
+env/
+**/env/

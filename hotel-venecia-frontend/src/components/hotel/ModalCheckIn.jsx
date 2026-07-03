@@ -1,14 +1,21 @@
 import React, { useState } from 'react';
 import { Button } from '../ui/Button';
 import { Select } from '../ui/Select';
+import CajaBlockedModal from '../ui/CajaBlockedModal';
+import { useCajaBlocked } from '../../hooks/useCajaBlocked';
+import { useNavigate } from 'react-router-dom';
 import api from '../../api/axiosConfig';
 
 export default function ModalCheckIn({ habitacion, onClose, onSuccess }) {
+  const navigate = useNavigate();
+  const { mostrarBloqueo, cajaActiva } = useCajaBlocked();
+  
   const [loading, setLoading] = useState(false);
   const [montoPagado, setMontoPagado] = useState(habitacion?.precio || 0);
   const [turnoIngreso, setTurnoIngreso] = useState('DIA');
   const [tipoPago, setTipoPago] = useState('EFECTIVO');
   const [esPareja, setEsPareja] = useState(false);
+  const [showCajaBlocked, setShowCajaBlocked] = useState(false);
 
   // Formulario del Huésped
   const [huesped, setHuesped] = useState({
@@ -54,6 +61,13 @@ export default function ModalCheckIn({ habitacion, onClose, onSuccess }) {
 
   const handleConfirmarIngreso = async (e) => {
     e.preventDefault();
+    
+    // 🔒 BLOQUEO DE SEGURIDAD: Validar caja abierta ANTES de enviar
+    if (!cajaActiva) {
+      setShowCajaBlocked(true);
+      return;
+    }
+    
     if (!huesped.nombre || !huesped.apellido || !huesped.dni_pasaporte) {
       alert("Por favor, complete los datos obligatorios del huésped (Nombre, Apellido y Documento).");
       return;
@@ -62,34 +76,39 @@ export default function ModalCheckIn({ habitacion, onClose, onSuccess }) {
     try {
       setLoading(true);
 
-      // Cuerpo de datos mapeado uno a uno con CheckInCreateSerializer de Django
       const payload = {
-      turno_ingreso: turnoIngreso,
-      tipo_pago: tipoPago,
-      monto_pagado: parseFloat(montoPagado) || 0.00, // Forzar cast flotante limpio
-      es_pareja: !!esPareja,
-      habitacion_id: parseInt(habitacion.id, 10),
-      // Encapsular los campos del estado del huésped en su propio nodo
-      huesped: {
-        nombre: huesped.nombre,
-        apellido: huesped.apellido,
-        dni_pasaporte: huesped.dni_pasaporte,
-        telefono: huesped.telefono,
-        ciudad_origen: huesped.ciudad_origen,
-        nacionalidad: huesped.nacionalidad || 'PERU',
-        estado_civil: huesped.estado_civil || 'SOLTERO',
-        tipo_visita: huesped.tipo_visita || 'INDEPENDIENTE'
-      }
-    };
+        turno_ingreso: turnoIngreso,
+        tipo_pago: tipoPago,
+        monto_pagado: Number(montoPagado),
+        es_pareja: esPareja,
+        habitacion_id: habitacion.id,
+        huesped: {
+          nombre: huesped.nombre,
+          apellido: huesped.apellido,
+          dni_pasaporte: huesped.dni_pasaporte,
+          telefono: huesped.telefono,
+          ciudad_origen: huesped.ciudad_origen,
+          nacionalidad: huesped.nacionalidad,
+          estado_civil: huesped.estado_civil,
+          tipo_visita: huesped.tipo_visita
+        }
+      };
 
-    // Despachar la petición con la estructura anidada requerida por DRF
-    const response = await api.post('/hotel/checkin/', payload);
-      
-      onSuccess(); // Actualiza el mapa de cuartos, contadores, caja y dashboard automáticamente
+      await api.post('/hotel/checkin/', payload);
+      onSuccess();
     } catch (err) {
       console.error("Error en el Check-in:", err);
-      const errorServer = err.response?.data?.error || "Error al registrar el ingreso. Verifique que la caja esté abierta.";
-      alert(errorServer);
+      
+      // Si el error es de caja no abierta, mostrar modal de bloqueo
+      if (err.response?.status === 400 && 
+          err.response?.data?.detail?.includes("Debe aperturar")) {
+        setShowCajaBlocked(true);
+      } else {
+        const errorServer = err.response?.data?.detail || 
+                          err.response?.data?.error || 
+                          "Error al registrar el ingreso.";
+        alert(errorServer);
+      }
     } finally {
       setLoading(false);
     }
@@ -99,6 +118,16 @@ export default function ModalCheckIn({ habitacion, onClose, onSuccess }) {
 
   return (
     <>
+      {/* MODAL DE BLOQUEO DE CAJA */}
+      <CajaBlockedModal 
+        isOpen={showCajaBlocked}
+        onClose={() => setShowCajaBlocked(false)}
+        onNavigateToCaja={() => {
+          navigate('/caja');
+          onClose();
+        }}
+      />
+      
       <div className="fixed inset-0 bg-slate-900/50 z-50 backdrop-blur-sm" onClick={onClose} />
       
       <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white z-50 shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
@@ -161,7 +190,6 @@ export default function ModalCheckIn({ habitacion, onClose, onSuccess }) {
               </div>
             </div>
 
-            {/* NUEVOS DESPLEGABLES: Nacionalidad, Estado Civil y Tipo de Visita */}
             <div className="grid grid-cols-2 gap-2 pt-1">
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Nacionalidad</label>

@@ -16,8 +16,8 @@ function buildLinksForRole(role) {
 
   const r = role.toLowerCase()
   if (r === 'admin') return all
-  if (r === 'recepcionista') return all.filter(l => ['/','/hotel','/cochera','/caja'].includes(l.to))
-  if (r === 'cajero') return [{ to: '/market', label: 'Market' }, { to: '/caja?module=market', label: 'Caja (Market)' }]
+  if (r === 'recepcionista') return all.filter(l => ['/','/hotel','/cochera','/caja','/recados'].includes(l.to))
+  if (r === 'cajero') return [{ to: '/', label: 'Dashboard' }, { to: '/market', label: 'Market' }, { to: '/caja?module=market', label: 'Caja (Market)' }, { to: '/recados', label: 'Recados' }]
   return [{ to: '/', label: 'Dashboard' }]
 }
 

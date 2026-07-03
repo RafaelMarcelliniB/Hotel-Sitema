@@ -40,11 +40,11 @@ export const router = createBrowserRouter([
       },
       { 
         path: 'caja', 
-        element: <ProtectedRoute allowedRoles={['admin', 'cajero']}><Caja /></ProtectedRoute> 
+        element: <ProtectedRoute allowedRoles={['admin', 'recepcionista', 'cajero']}><Caja /></ProtectedRoute> 
       },
       { 
         path: 'recados', 
-        element: <Recados /> // Acceso general para todos los trabajadores
+        element: <ProtectedRoute allowedRoles={['admin', 'recepcionista', 'cajero']}><Recados /></ProtectedRoute>
       },
       { 
         path: 'trabajadores', 

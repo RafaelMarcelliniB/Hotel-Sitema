@@ -24,8 +24,10 @@ export default function ModalAperturaCaja({ open, onClose }) {
       }
       await abrirCaja(formattedData)
       onClose()
+      alert('Caja abierta correctamente.')
     } catch (err) {
-      alert("Error al abrir caja: " + (err.response?.data?.error || "Verifique los datos"))
+      const msg = err.response?.data?.detail || err.response?.data?.error || 'Verifique los datos'
+      alert("Error al abrir caja: " + msg)
     }
   }
 

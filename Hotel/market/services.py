@@ -105,6 +105,9 @@ class VentaMarketService(BaseService):
             except TypeError:
                 MovimientoCaja.objects.create(
                     caja=caja,
+                    trabajador=caja.trabajador,
+                    turno=caja.turno,
+                    bloqueado=False,
                     tipo=datos_movimiento['tipo'],
                     tipo_caja=datos_movimiento['tipo_caja'],
                     modulo=datos_movimiento['modulo'],
@@ -113,6 +116,12 @@ class VentaMarketService(BaseService):
                     referencia=datos_movimiento['referencia'],
                     pagada=datos_movimiento['pagada']
                 )
+        
+        elif venta.tipo_venta == 'CARGADO_HABITACION' and venta.checkin_vinculado:
+            # Incrementar la deuda del hospedaje cuando es cargado a habitación
+            checkin = venta.checkin_vinculado
+            checkin.monto_deuda += total_venta
+            checkin.save()
         
         return venta
 

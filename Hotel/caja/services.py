@@ -13,8 +13,8 @@ class CajaService(BaseService):
     @transaction.atomic
     def abrir_caja(self, datos, trabajador):
         turno = datos['turno']
-        if self.repository.model.objects.filter(estado=Caja.Estado.ABIERTA, turno=turno).exists():
-            raise ValueError('Ya existe una caja abierta para este turno.')
+        if self.repository.model.objects.filter(estado=Caja.Estado.ABIERTA, turno=turno, trabajador=trabajador).exists():
+            raise ValueError('Ya existe una caja abierta para este trabajador en este turno.')
         return self.repository.create(
             trabajador=trabajador,
             turno=turno,
@@ -31,11 +31,20 @@ class CajaService(BaseService):
         egresos = caja.movimientos.filter(tipo=MovimientoCaja.Tipo.EGRESO).aggregate(total=Sum('monto')).get('total') or 0
         
         monto_final = float(caja.monto_inicial) + float(ingresos) - float(egresos)
-        
+        fecha_cierre = timezone.localdate()
+        hora_cierre = timezone.localtime().time()
+        fecha_hora_cierre = timezone.localtime()
+
+        caja.movimientos.update(
+            bloqueado=True,
+            trabajador=caja.trabajador,
+            turno=caja.turno,
+        )
+
         return self.repository.update(
             caja.id,
-            fecha_cierre=timezone.localdate(),
-            hora_cierre=timezone.localtime().time(),
+            fecha_cierre=fecha_cierre,
+            hora_cierre=hora_cierre,
             monto_final=monto_final,
             estado=Caja.Estado.CERRADA,
         )
@@ -79,13 +88,40 @@ class CajaService(BaseService):
             'movimientos': movimientos,
         }
 
+    def obtener_deudas_pendientes_activas(self):
+        """
+        Calcula DEUDAS PENDIENTES únicamente desde CheckIn activos.
+        
+        Lógica:
+        - Una deuda "pendiente" solo existe si el CheckIn está en estado ACTIVO
+        - Una vez que se completa el CheckOut, el CheckIn cambia a CERRADO
+        - Las deudas finalizadas no deben contarse en el Dashboard
+        
+        Devuelve: Suma total de monto_deuda de todos los CheckIn activos
+        """
+        from hotel.models import CheckIn
+        
+        checkins_activos = CheckIn.objects.filter(estado=CheckIn.Estado.ACTIVO)
+        total_deudas = checkins_activos.aggregate(total=Sum('monto_deuda')).get('total') or 0
+        
+        return float(total_deudas)
+
 
 class MovimientoCajaService(BaseService):
     repository_class = MovimientoCajaRepository
 
     @transaction.atomic
     def agregar_movimiento(self, datos, caja):
-        return self.repository.create(caja=caja, **datos)
+        if caja.estado == Caja.Estado.CERRADA:
+            raise ValueError('No se puede agregar movimientos a una caja cerrada.')
+
+        return self.repository.create(
+            caja=caja,
+            trabajador=caja.trabajador,
+            turno=caja.turno,
+            bloqueado=False,
+            **datos
+        )
 
     @transaction.atomic
     def pagar_deuda(self, movimiento):

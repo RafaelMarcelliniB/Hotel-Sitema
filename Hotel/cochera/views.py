@@ -144,6 +144,9 @@ class RegistroVehiculoSalidaView(APIView):
 
             MovimientoCaja.objects.create(
                 caja=caja_activa,
+                trabajador=caja_activa.trabajador,
+                turno=caja_activa.turno,
+                bloqueado=False,
                 tipo=MovimientoCaja.Tipo.INGRESO,
                 tipo_caja=tipo_caja,
                 modulo=MovimientoCaja.Modulo.COCHERA,

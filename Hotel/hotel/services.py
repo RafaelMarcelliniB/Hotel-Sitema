@@ -108,11 +108,26 @@ class CheckInService(BaseService):
         # INYECCIÓN AUTOMÁTICA EN CAJA (SOLUCIÓN AL BALANCE DEL DASHBOARD)
         # =====================================================================
         if monto_pagado > 0:
-            # Buscamos la caja que se encuentre abierta para este trabajador
-            caja_activa = Caja.objects.filter(trabajador=trabajador, estado='ABIERTA').first()
+            hoy = timezone.localdate()
+            turno_trabajador = getattr(trabajador, 'turno', None)
+
+            filtros_caja = {
+                'trabajador': trabajador,
+                'estado': Caja.Estado.ABIERTA,
+                'fecha_apertura': hoy,
+            }
+            if turno_trabajador:
+                filtros_caja['turno'] = turno_trabajador
+
+            # Buscamos la caja activa con la misma lógica que Navbar/validaciones
+            caja_activa = Caja.objects.filter(**filtros_caja).order_by('-fecha_apertura', '-hora_apertura').first()
             if not caja_activa:
-                # Fallback: Si no tiene una asignada directamente, tomamos la última caja global abierta
-                caja_activa = Caja.objects.filter(estado='ABIERTA').last()
+                # Fallback controlado: mismo usuario y fecha local por si hubo cambio de turno en perfil
+                caja_activa = Caja.objects.filter(
+                    trabajador=trabajador,
+                    estado=Caja.Estado.ABIERTA,
+                    fecha_apertura=hoy,
+                ).order_by('-fecha_apertura', '-hora_apertura').first()
 
             if caja_activa:
                 # Mapear el tipo de pago recibido al campo `tipo_caja` del modelo MovimientoCaja
@@ -131,6 +146,9 @@ class CheckInService(BaseService):
 
                 MovimientoCaja.objects.create(
                     caja=caja_activa,
+                    trabajador=caja_activa.trabajador,
+                    turno=caja_activa.turno,
+                    bloqueado=False,
                     monto=monto_pagado,
                     tipo=MovimientoCaja.Tipo.INGRESO,
                     tipo_caja=tipo_caja_val or MovimientoCaja.TipoCaja.EFECTIVO,
@@ -206,8 +224,10 @@ class CheckOutService(BaseService):
 
         checkout = self.repository.create(checkin=checkin, trabajador_checkout=trabajador, **checkout_data)
 
-        # Actualiza Check-In
-        checkin_repo.update(checkin.id, estado=CheckIn.Estado.CERRADO, 
+        # Actualiza Check-In: marca como CERRADO y resetea deuda a 0
+        checkin_repo.update(checkin.id, 
+                            estado=CheckIn.Estado.CERRADO,
+                            monto_deuda=Decimal('0.00'),  # ← CRUCIAL: Resetea deuda a cero
                             fecha_salida_real=timezone.now().date(),
                             hora_salida_real=timezone.now().time())
 

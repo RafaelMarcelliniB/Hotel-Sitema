@@ -16,8 +16,8 @@ export default function TopBar() {
   const { recados, marcarLeido } = useRecados()
   const [showNotifications, setShowNotifications] = useState(false)
 
-  // Filtramos recados no leídos que requieran atención (Media o Alta prioridad)
-  const notificaciones = recados.filter(r => !r.leido && r.prioridad !== 'BAJA')
+  // Filtramos recados pendientes o en proceso; los resueltos ya no deben mostrarse
+  const notificaciones = recados.filter(r => r.estado !== 'RESUELTO')
 
   // Verificamos si existe una caja activa en la respuesta del servidor
   const cajaActivaReal = resumen && resumen.caja
@@ -71,8 +71,8 @@ export default function TopBar() {
                   notificaciones.map(n => (
                     <div key={n.id} className="p-3 border-b hover:bg-slate-50 transition-colors flex flex-col gap-1 relative group">
                       <div className="flex justify-between items-center">
-                        <Badge variant={n.prioridad === 'ALTA' ? 'danger' : 'warning'} className="text-[9px] px-1 py-0">
-                          {n.prioridad}
+                        <Badge variant={n.estado === 'PENDIENTE' ? 'danger' : 'warning'} className="text-[9px] px-1 py-0">
+                          {n.estado}
                         </Badge>
                         <button 
                           onClick={() => marcarLeido(n.id)}
@@ -81,7 +81,7 @@ export default function TopBar() {
                           Marcar leído
                         </button>
                       </div>
-                      <p className="text-xs text-slate-700 pr-2 italic">"{n.contenido}"</p>
+                      <p className="text-xs text-slate-700 pr-2 italic">"{n.descripcion || n.titulo}"</p>
                     </div>
                   ))
                 ) : (
