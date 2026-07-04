@@ -37,6 +37,10 @@ class RegistroVehiculoService(BaseService):
             return round(((int(horas) + (1 if horas % 1 else 0)) * tarifa_base), 2)
         return round(max(horas, 1) * tarifa_base, 2)
 
+    def calcular_monto_para_registro(self, registro_id):
+        registro = RegistroVehiculo.objects.get(pk=registro_id)
+        return self._calcular_monto(registro.tarifa_tipo, registro.fecha_entrada, registro.hora_entrada)
+
     @transaction.atomic
     def registrar_ingreso(self, vehiculo_data, trabajador):
         vehiculo_data = dict(vehiculo_data)
@@ -66,25 +70,35 @@ class RegistroVehiculoService(BaseService):
 
     @transaction.atomic
     def registrar_salida(self, registro_id):
-        
+        # 1. Obtener la instancia real del registro desde el repositorio
         registro = self.repository.get_by_id(registro_id)
         
         if registro.fecha_salida:
             raise ValueError("Este vehículo ya registró su salida.")
-
-        monto_total = self._calcular_monto(registro.tarifa_tipo, registro.fecha_entrada, registro.hora_entrada)
-
-        #Actualiza datos de salida en el registro
-        self.repository.update(
-            registro.id,
-            fecha_salida=timezone.now().date(),
-            hora_salida=timezone.now().time(),
-            monto_total=monto_total
+        # Calcular el monto usando la lógica de negocio
+        monto_calculado = self._calcular_monto(
+            registro.tarifa_tipo,
+            registro.fecha_entrada,
+            registro.hora_entrada,
         )
 
-        #Libera el espacio de cochera
-        self.espacio_repo.update(registro.espacio.id, estado=EspacioCochera.Estado.LIBRE)
-        
+        # Convertir a Decimal por consistencia
+        try:
+            from decimal import Decimal
+            monto_calculado = Decimal(str(monto_calculado))
+        except Exception:
+            pass
+
+        # Actualiza la instancia y persiste
+        registro.fecha_salida = timezone.localdate()
+        registro.hora_salida = timezone.localtime().time()
+        registro.monto_total = monto_calculado
+        registro.save()
+
+        # Libera el espacio de cochera
+        if getattr(registro, 'espacio', None):
+            self.espacio_repo.update(registro.espacio.id, estado=EspacioCochera.Estado.LIBRE)
+
         return registro
     
     

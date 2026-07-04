@@ -5,7 +5,10 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from django.utils import timezone
+import traceback
 
+from caja.permissions import CajaAbertaPermission
 from market.models import IngresoMercaderia, Producto, VentaMarket
 from market.serializers import (
 	IngresoMercaderiaCreateSerializer,
@@ -14,7 +17,8 @@ from market.serializers import (
 	VentaMarketCreateSerializer,
 	VentaMarketSerializer,
 )
-from market.services import IngresoMercaderiaService, VentaMarketService
+from market.services import IngresoMercaderiaService, VentaMarketService, ProductoService
+
 
 
 def _serializar_venta(venta):
@@ -84,7 +88,7 @@ class IngresoMercaderiaViewSet(viewsets.ModelViewSet):
 class VentaMarketViewSet(viewsets.ModelViewSet):
 	queryset = VentaMarket.objects.select_related('trabajador', 'checkin_vinculado').prefetch_related('detalles', 'detalles__producto').order_by('-fecha', '-hora')
 	serializer_class = VentaMarketSerializer
-	permission_classes = [IsAuthenticated]
+	permission_classes = [IsAuthenticated, CajaAbertaPermission]
 
 	def get_queryset(self):
 		queryset = super().get_queryset()
@@ -109,9 +113,22 @@ class VentaMarketViewSet(viewsets.ModelViewSet):
 		}
 		if data.get('checkin_vinculado_id'):
 			venta_data['checkin_vinculado_id'] = data['checkin_vinculado_id']
-		venta = VentaMarketService().registrar_venta_con_stock(venta_data, detalles, request.user)
-		return Response(_serializar_venta(venta), status=status.HTTP_201_CREATED)
-
+		
+		try:
+			# Ejecuta el flujo lógico que valida stock y caja activa
+			venta = VentaMarketService().registrar_venta_con_stock(venta_data, detalles, request.user)
+			return Response(_serializar_venta(venta), status=status.HTTP_201_CREATED)
+		
+		except ValueError as e:
+			# Captura el error de "No se puede registrar una venta si el trabajador no cuenta con una caja abierta..."
+			return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+		
+		except Exception as e:
+			# Muestra la traza exacta en tu consola de Django si ocurre un error 500 inesperado
+			print("=== ERROR 500 EN VENTAMARKETVIEWSET ===")
+			traceback.print_exc()
+			print("========================================")
+			return Response({'detail': f'Error interno en el servidor: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class HealthMarketView(APIView):
 	permission_classes = [IsAuthenticated]

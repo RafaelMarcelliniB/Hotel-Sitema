@@ -48,6 +48,9 @@ class MovimientoCaja(BaseModel):
 		OTRO = 'OTRO', 'Otro'
 
 	caja = models.ForeignKey(Caja, on_delete=models.CASCADE, related_name='movimientos')
+	trabajador = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='movimientos_caja')
+	turno = models.CharField(max_length=20, choices=Caja.Turno.choices)
+	bloqueado = models.BooleanField(default=False)
 	tipo = models.CharField(max_length=20, choices=Tipo.choices)
 	tipo_caja = models.CharField(max_length=20, choices=TipoCaja.choices)
 	modulo = models.CharField(max_length=20, choices=Modulo.choices)

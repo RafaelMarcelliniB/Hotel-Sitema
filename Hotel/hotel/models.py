@@ -83,6 +83,7 @@ class Huesped(BaseModel):
 class CheckIn(BaseModel):
 	class TurnoIngreso(models.TextChoices):
 		DIA = 'DIA', 'Día'
+		TARDE = 'TARDE', 'Tarde'
 		NOCHE = 'NOCHE', 'Noche'
 		MADRUGADA = 'MADRUGADA', 'Madrugada'
 

@@ -13,8 +13,8 @@ class CajaService(BaseService):
     @transaction.atomic
     def abrir_caja(self, datos, trabajador):
         turno = datos['turno']
-        if self.repository.model.objects.filter(estado=Caja.Estado.ABIERTA, turno=turno).exists():
-            raise ValueError('Ya existe una caja abierta para este turno.')
+        if self.repository.model.objects.filter(estado=Caja.Estado.ABIERTA, turno=turno, trabajador=trabajador).exists():
+            raise ValueError('Ya existe una caja abierta para este trabajador en este turno.')
         return self.repository.create(
             trabajador=trabajador,
             turno=turno,
@@ -26,25 +26,56 @@ class CajaService(BaseService):
 
     @transaction.atomic
     def cerrar_caja(self, caja):
+        # El cierre oficial también debe basarse estrictamente en ingresos y egresos reales
         ingresos = caja.movimientos.filter(tipo=MovimientoCaja.Tipo.INGRESO).aggregate(total=Sum('monto')).get('total') or 0
         egresos = caja.movimientos.filter(tipo=MovimientoCaja.Tipo.EGRESO).aggregate(total=Sum('monto')).get('total') or 0
-        monto_final = caja.monto_inicial + ingresos - egresos
+        
+        monto_final = float(caja.monto_inicial) + float(ingresos) - float(egresos)
+        fecha_cierre = timezone.localdate()
+        hora_cierre = timezone.localtime().time()
+        fecha_hora_cierre = timezone.localtime()
+
+        caja.movimientos.update(
+            bloqueado=True,
+            trabajador=caja.trabajador,
+            turno=caja.turno,
+        )
+
         return self.repository.update(
             caja.id,
-            fecha_cierre=timezone.localdate(),
-            hora_cierre=timezone.localtime().time(),
+            fecha_cierre=fecha_cierre,
+            hora_cierre=hora_cierre,
             monto_final=monto_final,
             estado=Caja.Estado.CERRADA,
         )
 
     def obtener_resumen(self, caja):
-        movimientos = caja.movimientos.all()
-        total_efectivo = movimientos.filter(tipo_caja=MovimientoCaja.TipoCaja.EFECTIVO, pagada=False).aggregate(total=Sum('monto')).get('total') or 0
-        total_yape = movimientos.filter(tipo_caja=MovimientoCaja.TipoCaja.YAPE, pagada=False).aggregate(total=Sum('monto')).get('total') or 0
-        total_tarjeta = movimientos.filter(tipo_caja=MovimientoCaja.TipoCaja.TARJETA, pagada=False).aggregate(total=Sum('monto')).get('total') or 0
+        # Capturamos todos los movimientos del turno actual
+        movimientos = caja.movimientos.all().order_by('fecha_hora')
+        
+        # SOLUCIÓN DEL BUG: Filtramos por tipo_caja pero asegurando que SOLO sume el dinero que ingresó realmente
+        total_efectivo = movimientos.filter(
+            tipo_caja=MovimientoCaja.TipoCaja.EFECTIVO, 
+            tipo=MovimientoCaja.Tipo.INGRESO
+        ).aggregate(total=Sum('monto')).get('total') or 0
+
+        total_yape = movimientos.filter(
+            tipo_caja=MovimientoCaja.TipoCaja.YAPE, 
+            tipo=MovimientoCaja.Tipo.INGRESO
+        ).aggregate(total=Sum('monto')).get('total') or 0
+
+        total_tarjeta = movimientos.filter(
+            tipo_caja=MovimientoCaja.TipoCaja.TARJETA, 
+            tipo=MovimientoCaja.Tipo.INGRESO
+        ).aggregate(total=Sum('monto')).get('total') or 0
+        
         total_ingresos = movimientos.filter(tipo=MovimientoCaja.Tipo.INGRESO).aggregate(total=Sum('monto')).get('total') or 0
         total_egresos = movimientos.filter(tipo=MovimientoCaja.Tipo.EGRESO).aggregate(total=Sum('monto')).get('total') or 0
         deudas = movimientos.filter(tipo=MovimientoCaja.Tipo.DEUDA, pagada=False)
+        
+        # OPERACIÓN MATEMÁTICA PURA: Monto Inicial + lo recaudado en los diferentes métodos - salidas efectivas
+        total_general = float(caja.monto_inicial) + float(total_efectivo) + float(total_yape) + float(total_tarjeta) - float(total_egresos)
+        
         return {
             'monto_inicial': caja.monto_inicial,
             'total_efectivo': total_efectivo,
@@ -52,9 +83,28 @@ class CajaService(BaseService):
             'total_tarjeta': total_tarjeta,
             'total_ingresos': total_ingresos,
             'total_egresos': total_egresos,
+            'total_general': total_general,  
             'deudas_pendientes': deudas,
             'movimientos': movimientos,
         }
+
+    def obtener_deudas_pendientes_activas(self):
+        """
+        Calcula DEUDAS PENDIENTES únicamente desde CheckIn activos.
+        
+        Lógica:
+        - Una deuda "pendiente" solo existe si el CheckIn está en estado ACTIVO
+        - Una vez que se completa el CheckOut, el CheckIn cambia a CERRADO
+        - Las deudas finalizadas no deben contarse en el Dashboard
+        
+        Devuelve: Suma total de monto_deuda de todos los CheckIn activos
+        """
+        from hotel.models import CheckIn
+        
+        checkins_activos = CheckIn.objects.filter(estado=CheckIn.Estado.ACTIVO)
+        total_deudas = checkins_activos.aggregate(total=Sum('monto_deuda')).get('total') or 0
+        
+        return float(total_deudas)
 
 
 class MovimientoCajaService(BaseService):
@@ -62,7 +112,16 @@ class MovimientoCajaService(BaseService):
 
     @transaction.atomic
     def agregar_movimiento(self, datos, caja):
-        return self.repository.create(caja=caja, **datos)
+        if caja.estado == Caja.Estado.CERRADA:
+            raise ValueError('No se puede agregar movimientos a una caja cerrada.')
+
+        return self.repository.create(
+            caja=caja,
+            trabajador=caja.trabajador,
+            turno=caja.turno,
+            bloqueado=False,
+            **datos
+        )
 
     @transaction.atomic
     def pagar_deuda(self, movimiento):

@@ -5,9 +5,29 @@ from cochera.models import EspacioCochera, RegistroVehiculo
 
 
 class EspacioCocheraSerializer(BaseSerializer):
+    registro_activo = serializers.SerializerMethodField()
+
     class Meta:
         model = EspacioCochera
         fields = '__all__'
+
+    def get_registro_activo(self, obj):
+        if obj.estado == EspacioCochera.Estado.OCUPADO:
+            # Buscamos el último registro que aún no tenga hora de salida
+            registro = obj.vehiculos.filter(fecha_salida__isnull=True).last()
+            if registro:
+                return {
+                    "id": registro.id,
+                    "placa": registro.placa,
+                    "nombre_conductor": registro.nombre_conductor,
+                    "dni_conductor": registro.dni_conductor,
+                    "hora_entrada": str(registro.hora_entrada),
+                    "fecha_entrada": str(registro.fecha_entrada),
+                    "tarifa_tipo": registro.tarifa_tipo,
+                    "monto_total": str(registro.monto_total),
+                    "tipo_cliente": registro.tipo_cliente  # 🔥 Línea agregada para solucionar el bug
+                }
+        return None
 
 
 class RegistroVehiculoSerializer(BaseSerializer):

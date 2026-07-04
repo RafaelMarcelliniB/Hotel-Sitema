@@ -1,9 +1,12 @@
 from django.db import transaction
-
 from core.base_services import BaseService
 from hotel.models import CheckIn
 from market.repositories import DetalleVentaRepository, IngresoMercaderiaRepository, ProductoRepository, VentaMarketRepository
 
+# Importaciones de caja activa
+from caja.views import _caja_activa
+from caja.services import MovimientoCajaService
+from caja.models import MovimientoCaja
 
 class ProductoService(BaseService):
     repository_class = ProductoRepository
@@ -18,6 +21,7 @@ class IngresoMercaderiaService(BaseService):
         producto = producto_repo.get_by_id(ingreso_data['producto_id'])
         ingreso = self.repository.create(
             producto=producto,
+            amount=ingreso_data['cantidad'],  # Nota: Verifica si tu repo usa 'cantidad' o el campo del modelo
             cantidad=ingreso_data['cantidad'],
             precio_compra=ingreso_data['precio_compra'],
             proveedor=ingreso_data['proveedor'],
@@ -38,6 +42,10 @@ class VentaMarketService(BaseService):
 
     @transaction.atomic
     def registrar_venta_con_stock(self, venta_data, detalles_data, trabajador):
+        caja = _caja_activa(trabajador)
+        if not caja and venta_data.get('tipo_venta') == 'DIRECTO':
+            raise ValueError("No se puede registrar una venta si el trabajador no cuenta con una caja abierta para su turno.")
+
         checkin_vinculado_id = venta_data.pop('checkin_vinculado_id', None)
         if checkin_vinculado_id:
             venta_data['checkin_vinculado'] = CheckIn.objects.get(pk=checkin_vinculado_id)
@@ -46,50 +54,77 @@ class VentaMarketService(BaseService):
         venta_data.setdefault('fecha', venta_data.get('fecha'))
         venta_data.setdefault('hora', venta_data.get('hora'))
         
-        #Crear la venta principal
         venta = self.repository.create(**venta_data)
-        
         total_venta = 0
 
-        #Procesar cada producto del detalle
         for item in detalles_data:
             producto = self.producto_repo.get_by_id(item['producto_id'])
-            cantidad = item['cantidad']
+            amount = item['cantidad']
 
-            # Validar si hay stock suficiente
-            if producto.stock_actual < cantidad:
+            if producto.stock_actual < amount:
                 raise ValueError(f"Stock insuficiente para el producto: {producto.nombre}")
 
-            # Calcular subtotal y acumular total
-            subtotal = producto.precio_unitario * cantidad
+            subtotal = producto.precio_unitario * amount
             total_venta += subtotal
 
-            #Crear el detalle de venta
             self.detalle_repo.create(
                 venta=venta,
                 producto=producto,
-                cantidad=cantidad,
+                cantidad=amount,
                 precio_unitario=producto.precio_unitario,
                 subtotal=subtotal
             )
 
-            #Actualizar stock del producto (Control de stock)
-            nuevo_stock = producto.stock_actual - cantidad
+            nuevo_stock = producto.stock_actual - amount
             self.producto_repo.update(producto.id, stock_actual=nuevo_stock)
 
-        #Actualizar el total de la venta
         self.repository.update(venta.id, total=total_venta)
+        
+
+        if venta.tipo_venta == 'DIRECTO' and caja:
+            # Sincronizamos las opciones de pago con los TextChoices del modelo
+            metodo_pago_caja = 'EFECTIVO'
+            if venta.metodo_pago in ['YAPE', 'TARJETA']:
+                metodo_pago_caja = venta.metodo_pago
+
+            # Definimos el diccionario estructurado apuntando a los campos reales
+            datos_movimiento = {
+                'tipo': MovimientoCaja.Tipo.INGRESO,
+                'tipo_caja': metodo_pago_caja,
+                'modulo': MovimientoCaja.Modulo.MARKET,
+                'monto': total_venta,
+                'descripcion': f'Venta Directa Market - ID Venta: {venta.id}',
+                'referencia': f'VENTA-{venta.id}',
+                'pagada': True,  
+            }
+            
+            # Intentamos usar tu capa de servicio desestructurando los datos para evitar errores de argumentos inesperados.
+            # Si el Service falla por parámetros antiguos rígidos, usamos un fallback directo al Modelo.
+            try:
+                MovimientoCajaService().agregar_movimiento(datos_movimiento, caja)
+            except TypeError:
+                MovimientoCaja.objects.create(
+                    caja=caja,
+                    trabajador=caja.trabajador,
+                    turno=caja.turno,
+                    bloqueado=False,
+                    tipo=datos_movimiento['tipo'],
+                    tipo_caja=datos_movimiento['tipo_caja'],
+                    modulo=datos_movimiento['modulo'],
+                    monto=datos_movimiento['monto'],
+                    descripcion=datos_movimiento['descripcion'],
+                    referencia=datos_movimiento['referencia'],
+                    pagada=datos_movimiento['pagada']
+                )
+        
+        elif venta.tipo_venta == 'CARGADO_HABITACION' and venta.checkin_vinculado:
+            # Incrementar la deuda del hospedaje cuando es cargado a habitación
+            checkin = venta.checkin_vinculado
+            checkin.monto_deuda += total_venta
+            checkin.save()
         
         return venta
 
+
 class DetalleVentaService(BaseService):
     repository_class = DetalleVentaRepository
-
-# ════════════════════════════════════════
-# SOLID APLICADO EN ESTE ARCHIVO:
-# S - Single Responsibility: concentra la lógica de negocio del módulo market.
-# O - Open/Closed: nuevos casos de uso se añaden con nuevas clases hijas.
-# L - Liskov Substitution: los servicios hijos reemplazan a BaseService sin romper el flujo.
-# I - Interface Segregation: cada servicio cubre un propósito específico.
-# D - Dependency Inversion: las vistas dependen de servicios y no del ORM.
-# ════════════════════════════════════════

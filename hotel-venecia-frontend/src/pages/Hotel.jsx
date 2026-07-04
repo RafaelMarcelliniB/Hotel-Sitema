@@ -1,24 +1,108 @@
-import Card from '../components/ui/Card'
-import Table from '../components/ui/Table'
+import { useState } from 'react'
 import { useHabitaciones } from '../hooks/useHabitaciones'
+import HabitacionCard from '../components/hotel/HabitacionCard'
+import ModalCheckIn from '../components/hotel/ModalCheckIn'
+import ModalCheckOut from '../components/hotel/ModalCheckOut' 
+import Spinner from '../components/ui/Spinner'
+import api from '../api/axiosConfig' 
 
 export default function Hotel() {
-  const { data = [] } = useHabitaciones()
+  const { habitaciones, isLoading, refetch } = useHabitaciones()
+  const [selectedHab, setSelectedHab] = useState(null)
+  const [showCheckIn, setShowCheckIn] = useState(false)
+  const [showCheckOut, setShowCheckOut] = useState(false) 
+
+  // Nueva función para consumir el endpoint de limpieza que tienes en Django
+  const handleTerminarLimpieza = async (habitacionId, numeroHabitacion) => {
+    const confirmar = window.confirm(
+      `¿Confirmas que la Habitación #${numeroHabitacion} ya está limpia y lista para volver a estar disponible?`
+    );
+    
+    if (confirmar) {
+      try {
+        // Ejecuta un POST a la ruta que configuraste en tu urls.py
+        await api.post(`/hotel/habitaciones/${habitacionId}/limpiar/`);
+        alert(`¡Habitación #${numeroHabitacion} marcada como LIMPIA con éxito!`);
+        refetch(); // Refresca automáticamente el mapa para que vuelva a salir verde
+      } catch (error) {
+        console.error("Error al limpiar la habitación:", error);
+        alert("Ocurrió un error al intentar actualizar el estado de limpieza.");
+      }
+    }
+  };
+
+  const handleRoomClick = (hab) => {
+    console.log("Datos de habitación seleccionada:", hab);
+
+    // 1. PRIMERA VALIDACIÓN: Si está OCUPADA, se abre el Check-Out obligatoriamente
+    if (hab.estado_ocupacion === 'OCUPADO' || hab.estado === 'OCUPADO') {
+      setSelectedHab(hab);
+      setShowCheckOut(true);
+      setShowCheckIn(false);
+    } 
+    // 2. SEGUNDA VALIDACIÓN: Si NO está ocupada pero está SUCIA, se dispara la limpieza
+    else if (hab.estado_limpieza === 'SUCIO') {
+      handleTerminarLimpieza(hab.id, hab.numero);
+    } 
+    // 3. TERCERA OPCIÓN: Si está limpia y libre, se abre el Check-In para alquilarla
+    else {
+      setSelectedHab(hab);
+      setShowCheckIn(true);
+      setShowCheckOut(false);
+    }
+  };
+
+  const handleCloseModals = () => {
+    setShowCheckIn(false);
+    setShowCheckOut(false);
+    setSelectedHab(null);
+  };
+
+  const handleSuccess = () => {
+    handleCloseModals();
+    refetch(); // Refresca el mapa para ver los cambios de colores
+  };
+
+  if (isLoading) return (
+    <div className="flex h-screen items-center justify-center">
+      <Spinner />
+    </div>
+  )
 
   return (
-    <Card>
-      <h3 className="mb-4 text-lg font-semibold">Habitaciones</h3>
-      <Table columns={['Número', 'Tipo', 'Ocupación', 'Limpieza', 'Tarifa']}>
-        {data.map((habitacion) => (
-          <tr key={habitacion.id}>
-            <td className="px-4 py-3">{habitacion.numero}</td>
-            <td className="px-4 py-3">{habitacion.tipo}</td>
-            <td className="px-4 py-3">{habitacion.estado_ocupacion}</td>
-            <td className="px-4 py-3">{habitacion.estado_limpieza}</td>
-            <td className="px-4 py-3">S/ {habitacion.tarifa_dia}</td>
-          </tr>
+    <div className="p-6 bg-slate-50 min-h-screen">
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold text-slate-800">Mapa de Habitaciones</h2>
+        <p className="text-sm text-slate-500">Selecciona una habitación disponible para ingreso o una ocupada para salida</p>
+      </div>
+      
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
+        {habitaciones?.map(hab => (
+          <HabitacionCard 
+            key={hab.id} 
+            habitacion={hab} 
+            onClick={handleRoomClick} 
+          />
         ))}
-      </Table>
-    </Card>
+      </div>
+
+      {/* Modal para Registro (Entrada) */}
+      {showCheckIn && selectedHab && (
+        <ModalCheckIn 
+          habitacion={selectedHab} 
+          onClose={handleCloseModals}
+          onSuccess={handleSuccess}
+        />
+      )}
+
+      {/* Modal para Check-Out (Salida) */}
+      {showCheckOut && selectedHab && (
+        <ModalCheckOut 
+          habitacion={selectedHab} 
+          onClose={handleCloseModals}
+          onSuccess={handleSuccess}
+        />
+      )}
+    </div>
   )
 }

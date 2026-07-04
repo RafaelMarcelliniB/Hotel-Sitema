@@ -1,6 +1,6 @@
 import { forwardRef } from 'react'
 
-const Input = forwardRef(function Input({ className = '', ...props }, ref) {
+export const Input = forwardRef(function Input({ className = '', ...props }, ref) {
   return (
     <input
       ref={ref}
