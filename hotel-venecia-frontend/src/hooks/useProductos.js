@@ -21,10 +21,37 @@ export function useProductos() {
     }
   })
 
+  const importarProductos = useMutation({
+    mutationFn: async (file) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      const { data } = await api.post('/market/productos/importar-excel/', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['productos'])
+    }
+  })
+
+  const previewProductos = useMutation({
+    mutationFn: async (file) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      const { data } = await api.post('/market/productos/preview-excel/', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      return data
+    }
+  })
+
   return {
     ...query,
     productos: query.data || [],
     procesarVenta: registrarVenta.mutateAsync,
-    isSelling: registrarVenta.isLoading
+    isSelling: registrarVenta.isLoading,
+    importarProductos: importarProductos.mutateAsync,
+    previewProductos: previewProductos.mutateAsync,
   }
 }

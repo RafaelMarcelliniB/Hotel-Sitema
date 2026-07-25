@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '../ui/Button';
 import { Select } from '../ui/Select';
 import CajaBlockedModal from '../ui/CajaBlockedModal';
@@ -6,7 +6,7 @@ import { useCajaBlocked } from '../../hooks/useCajaBlocked';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/axiosConfig';
 
-export default function ModalCheckIn({ habitacion, onClose, onSuccess }) {
+export default function ModalCheckIn({ habitacion, onClose, onSuccess, initialData }) {
   const navigate = useNavigate();
   const { mostrarBloqueo, cajaActiva } = useCajaBlocked();
   
@@ -28,6 +28,32 @@ export default function ModalCheckIn({ habitacion, onClose, onSuccess }) {
     estado_civil: 'SOLTERO',
     tipo_visita: 'INDEPENDIENTE'
   });
+
+  // Prefill with initialData when provided (e.g., coming from a reserva)
+  useEffect(() => {
+    if (!initialData) return
+    if (initialData.huesped) {
+      setHuesped(prev => ({ ...prev, ...initialData.huesped }))
+    }
+    // Asegurar mapeo flexible y determinista del teléfono desde la reserva
+    const celularReal = (
+      initialData?.cliente_telefono ||
+      initialData?.telefono ||
+      initialData?.celular ||
+      initialData?.cliente?.celular ||
+      initialData?.cliente?.telefono ||
+      ''
+    )
+    setHuesped(prev => ({
+      ...prev,
+      telefono: prev.telefono || celularReal || (initialData.huesped && initialData.huesped.telefono) || ''
+    }))
+    // Prefill monto pagado a partir de los posibles campos de reserva
+    const montoPrefill = initialData.monto_pagado ?? initialData.monto_garantia ?? initialData.monto_adelanto ?? initialData.monto_adelanto
+    if (montoPrefill !== undefined) setMontoPagado(montoPrefill)
+    if (initialData.tipo_pago) setTipoPago(initialData.tipo_pago)
+    if (initialData.turno_ingreso) setTurnoIngreso(initialData.turno_ingreso)
+  }, [initialData])
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -82,7 +108,10 @@ export default function ModalCheckIn({ habitacion, onClose, onSuccess }) {
         monto_pagado: Number(montoPagado),
         es_pareja: esPareja,
         habitacion_id: habitacion.id,
-        huesped: {
+        // Si venimos desde una reserva, enviar `reserva_id` para que el backend lo asocie.
+        ...(initialData?.id ? { reserva_id: initialData.id, from_reserva: true } : {}),
+        // Preferir enviar `huesped_id` cuando existe, para evitar duplicados; sino enviar datos completos.
+        ...(huesped?.id ? { huesped_id: huesped.id } : { huesped: {
           nombre: huesped.nombre,
           apellido: huesped.apellido,
           dni_pasaporte: huesped.dni_pasaporte,
@@ -91,7 +120,7 @@ export default function ModalCheckIn({ habitacion, onClose, onSuccess }) {
           nacionalidad: huesped.nacionalidad,
           estado_civil: huesped.estado_civil,
           tipo_visita: huesped.tipo_visita
-        }
+        }})
       };
 
       await api.post('/hotel/checkin/', payload);
@@ -128,9 +157,11 @@ export default function ModalCheckIn({ habitacion, onClose, onSuccess }) {
         }}
       />
       
-      <div className="fixed inset-0 bg-slate-900/50 z-50 backdrop-blur-sm" onClick={onClose} />
+      {/* Backdrop for drawer: lower than global alerts */}
+      <div className="fixed inset-0 bg-slate-900/50 z-30 backdrop-blur-sm" onClick={onClose} />
       
-      <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white z-50 shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+      {/* Drawer modal: sits under global alerts (z-40) */}
+      <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white z-40 shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
         
         {/* Cabecera */}
         <div className="p-6 border-b bg-emerald-50 flex justify-between items-center">
