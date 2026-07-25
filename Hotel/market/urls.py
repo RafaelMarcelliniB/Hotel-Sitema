@@ -1,6 +1,14 @@
 from django.urls import path
 
-from market.views import HealthMarketView, IngresoMercaderiaViewSet, ProductoViewSet, VentaMarketViewSet
+from market.views import (
+	HealthMarketView,
+	IngresoMercaderiaViewSet,
+	ProductoViewSet,
+	VentaMarketViewSet,
+	PreviewProductosExcelView,
+	ImportarProductosExcelView,
+	DescargarPlantillaProductosView,
+)
 
 urlpatterns = [
 	path('productos/', ProductoViewSet.as_view({'get': 'list', 'post': 'create'}), name='productos-list'),
@@ -11,6 +19,9 @@ urlpatterns = [
 	path('ventas/', VentaMarketViewSet.as_view({'get': 'list', 'post': 'create'}), name='ventas-list'),
 	path('ventas/<int:pk>/', VentaMarketViewSet.as_view({'get': 'retrieve', 'delete': 'destroy'}), name='ventas-detail'),
 	path('health/', HealthMarketView.as_view(), name='market-health'),
+	path('productos/preview-excel/', PreviewProductosExcelView.as_view(), name='productos-preview-excel'),
+	path('productos/importar-excel/', ImportarProductosExcelView.as_view(), name='productos-importar-excel'),
+	path('productos/plantilla/<str:formato>/', DescargarPlantillaProductosView.as_view(), name='productos-descargar-plantilla'),
 ]
 
 # ════════════════════════════════════════

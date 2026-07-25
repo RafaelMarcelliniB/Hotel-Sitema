@@ -2,14 +2,14 @@ from django.db.models import F
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.utils import timezone
 import traceback
 
 from caja.permissions import CajaAbertaPermission
-from market.models import IngresoMercaderia, Producto, VentaMarket
+from market.models import IngresoMercaderia, Producto, VentaMarket, Categoria
 from market.serializers import (
 	IngresoMercaderiaCreateSerializer,
 	IngresoMercaderiaSerializer,
@@ -18,6 +18,11 @@ from market.serializers import (
 	VentaMarketSerializer,
 )
 from market.services import IngresoMercaderiaService, VentaMarketService, ProductoService
+import pandas as pd
+from decimal import Decimal, InvalidOperation
+from io import BytesIO
+from django.http import HttpResponse
+import unicodedata
 
 
 
@@ -135,6 +140,258 @@ class HealthMarketView(APIView):
 
 	def get(self, request):
 		return Response({'module': 'market', 'status': 'ok'})
+
+
+class IsAdminTrabajadorPermission(BasePermission):
+	message = 'Se requieren privilegios de administrador.'
+
+	def has_permission(self, request, view):
+		user = getattr(request, 'user', None)
+		if not user or not user.is_authenticated:
+			return False
+		# Aceptar superuser o rol admin/administrador (tolerancia en mayúsculas)
+		rol = getattr(user, 'rol', '') or ''
+		return bool(user.is_superuser or rol.lower() in ('admin', 'administrador'))
+
+
+class PreviewProductosExcelView(APIView):
+	"""Recibe un archivo xlsx o csv y devuelve una previsualización de las primeras filas."""
+	permission_classes = [IsAuthenticated, IsAdminTrabajadorPermission]
+
+	def post(self, request):
+		f = request.FILES.get('file')
+		if not f:
+			return Response({'detail': 'Archivo no provisto'}, status=status.HTTP_400_BAD_REQUEST)
+
+		try:
+			if f.name.lower().endswith('.csv'):
+				df = pd.read_csv(f)
+			else:
+				df = pd.read_excel(f, engine='openpyxl')
+		except Exception as e:
+			return Response({'detail': f'Error al leer el archivo: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+		# Normalizar nombres de columnas para búsqueda robusta
+		def _norm(col):
+			if not isinstance(col, str):
+				return ''
+			col = col.strip()
+			col = unicodedata.normalize('NFKD', col)
+			col = col.encode('ascii', 'ignore').decode('ascii')
+			col = col.lower()
+			col = ''.join(ch for ch in col if ch.isalnum())
+			return col
+
+		col_map = { _norm(c): c for c in df.columns }
+
+		expected = ['Nombre', 'Categoria', 'Precio Unitario', 'Stock Actual', 'Stock Minimo', 'Tipo Registro', 'Activo']
+		rows = []
+		for idx, raw_row in df.head(20).iterrows():
+			row = raw_row.fillna('')
+			def val(label):
+				key = _norm(label)
+				orig = col_map.get(key)
+				if orig is None:
+					return ''
+				return row.get(orig, '')
+
+			rows.append({
+				'fila': int(idx) + 2,
+				'Nombre': str(val('Nombre')),
+				'Categoria': str(val('Categoria')),
+				'Precio Unitario': str(val('Precio Unitario')),
+				'Stock Actual': str(val('Stock Actual')),
+				'Stock Minimo': str(val('Stock Minimo')),
+				'Tipo Registro': str(val('Tipo Registro')),
+				'Activo': str(val('Activo')),
+			})
+
+		return Response({'preview': rows})
+
+
+class ImportarProductosExcelView(APIView):
+	"""Importa productos desde Excel o CSV. Solo administradores."""
+	permission_classes = [IsAuthenticated, IsAdminTrabajadorPermission]
+
+	def post(self, request):
+		f = request.FILES.get('file')
+		if not f:
+			return Response({'detail': 'Archivo no provisto'}, status=status.HTTP_400_BAD_REQUEST)
+
+		try:
+			if f.name.lower().endswith('.csv'):
+				df = pd.read_csv(f)
+			else:
+				df = pd.read_excel(f, engine='openpyxl')
+		except Exception as e:
+			return Response({'detail': f'Error al leer el archivo: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+		created = 0
+		updated = 0
+		errors = []
+
+		# Normalización de columnas
+		def _norm(col):
+			if not isinstance(col, str):
+				return ''
+			col = col.strip()
+			col = unicodedata.normalize('NFKD', col)
+			col = col.encode('ascii', 'ignore').decode('ascii')
+			col = col.lower()
+			col = ''.join(ch for ch in col if ch.isalnum())
+			return col
+
+		col_map = { _norm(c): c for c in df.columns }
+
+		# Mapeos de elección tipo registro y categorías disponibles
+		tipo_map = { _norm(label): value for (value, label) in Producto.TipoRegistro.choices }
+
+		# también mapa de etiquetas -> valor para categorias (labels de choices)
+		categoria_map = { _norm(label): value for (value, label) in Producto._meta.get_field('categoria').choices }
+
+		for idx, raw_row in df.iterrows():
+			fila = int(idx) + 2
+			row = raw_row.fillna('')
+			try:
+				# helper para obtener valor por etiqueta esperada
+				def val(label):
+					key = _norm(label)
+					orig = col_map.get(key)
+					if orig is None:
+						return ''
+					return row.get(orig, '')
+
+				nombre = str(val('Nombre')).strip()
+				if not nombre:
+					raise ValueError('Nombre obligatorio')
+
+				# Categoria: buscar en choices por label, si no existe usar el texto en mayúsculas (crea categoría implícita)
+				categoria_raw = str(val('Categoria')).strip()
+				categoria_key = _norm(categoria_raw)
+				if categoria_raw:
+					categoria = categoria_map.get(categoria_key)
+					if not categoria:
+						# intentar usar valor directo (por si el CSV contiene el código)
+						if categoria_raw.upper() in [c for (c, _) in Producto._meta.get_field('categoria').choices]:
+							categoria = categoria_raw.upper()
+						else:
+							# usar texto recibido como valor, truncando a 30 chars
+							categoria = categoria_raw.upper()[:30]
+				else:
+					categoria = None
+
+				if not categoria:
+					raise ValueError(f'Categoria inválida o vacía: {categoria_raw}')
+
+				# Precio
+				precio_raw = val('Precio Unitario')
+				try:
+					precio_unitario = Decimal(str(precio_raw)) if precio_raw != '' else Decimal('0')
+				except (InvalidOperation, TypeError):
+					raise ValueError(f'Precio Unitario inválido: {precio_raw}')
+
+				# Stock actual
+				stock_actual_raw = val('Stock Actual')
+				try:
+					stock_actual = int(stock_actual_raw) if stock_actual_raw != '' else 0
+				except Exception:
+					raise ValueError(f'Stock Actual inválido: {stock_actual_raw}')
+
+				# Stock minimo
+				stock_minimo_raw = val('Stock Minimo')
+				stock_minimo = 0
+				if stock_minimo_raw != '':
+					try:
+						stock_minimo = int(stock_minimo_raw)
+					except Exception:
+						raise ValueError(f'Stock Minimo inválido: {stock_minimo_raw}')
+
+				# Tipo registro
+				tipo_raw = str(val('Tipo Registro')).strip()
+				tipo_key = _norm(tipo_raw)
+				tipo_registro = tipo_map.get(tipo_key) if tipo_raw else Producto.TipoRegistro.STOCK
+
+				# Activo
+				activo_raw = str(val('Activo')).strip().lower()
+				if activo_raw in ['false', 'no', '0', 'n']:
+					activo = False
+				elif activo_raw in ['true', 'si', '1', 's']:
+					activo = True
+				elif activo_raw == '':
+					activo = True
+				else:
+					activo = True
+
+				producto, created_flag = Producto.objects.get_or_create(nombre=nombre, defaults={
+					'categoria': categoria,
+					'precio_unitario': precio_unitario,
+					'stock_actual': stock_actual,
+					'stock_minimo': stock_minimo,
+					'tipo_registro': tipo_registro,
+					'activo': activo,
+				})
+
+				if created_flag:
+					created += 1
+				else:
+					# Actualizar campos relevantes
+					producto.categoria = categoria
+					producto.precio_unitario = precio_unitario
+					producto.stock_actual = stock_actual
+					producto.stock_minimo = stock_minimo
+					producto.tipo_registro = tipo_registro
+					producto.activo = activo
+					producto.save()
+					updated += 1
+
+			except Exception as e:
+				errors.append({'fila': fila, 'error': str(e)})
+
+		return Response({'created': created, 'updated': updated, 'errors': errors})
+
+
+class DescargarPlantillaProductosView(APIView):
+    """Entrega al cliente una plantilla de ejemplo en .xlsx o .csv.
+
+    Ambos formatos contienen exactamente las mismas cabeceras/columnas
+    para que el importador las procese de forma idéntica.
+
+    Ruta esperada: /market/productos/plantilla/<format>/  donde
+    <format> es 'xlsx' o 'csv'.
+    """
+    permission_classes = [IsAuthenticated, IsAdminTrabajadorPermission]
+
+    def get(self, request, formato=None):
+        required_headers = [
+            'Nombre', 'Categoria', 'Precio Unitario', 'Stock Actual',
+            'Stock Minimo', 'Tipo Registro', 'Activo'
+        ]
+
+        # DataFrame vacío con las columnas en el orden esperado
+        df = pd.DataFrame(columns=required_headers)
+
+        formato = (formato or '').lower()
+        if formato == 'xlsx':
+            buf = BytesIO()
+            # to_excel genera un archivo Excel con las mismas columnas
+            df.to_excel(buf, index=False, engine='openpyxl')
+            buf.seek(0)
+            resp = HttpResponse(
+                buf.read(),
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            resp['Content-Disposition'] = 'attachment; filename="plantilla_productos.xlsx"'
+            return resp
+
+        elif formato == 'csv':
+            # csv con BOM UTF-8 para compatibilidad con Excel en Windows
+            csv_text = df.to_csv(index=False, encoding='utf-8-sig')
+            resp = HttpResponse(csv_text, content_type='text/csv; charset=utf-8')
+            resp['Content-Disposition'] = 'attachment; filename="plantilla_productos.csv"'
+            return resp
+
+        else:
+            return Response({'detail': 'Formato no soportado. Use "xlsx" o "csv".'}, status=status.HTTP_400_BAD_REQUEST)
 
 # ════════════════════════════════════════
 # SOLID APLICADO EN ESTE ARCHIVO:
