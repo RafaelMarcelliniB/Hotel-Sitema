@@ -63,6 +63,16 @@ class DashboardView(APIView):
         habitaciones = Habitacion.objects.all()
         checkins_activos = CheckIn.objects.filter(estado=CheckIn.Estado.ACTIVO).select_related('habitacion', 'huesped')
         reservas_hoy = Reserva.objects.filter(fecha_llegada_estimada=hoy).select_related('huesped', 'habitacion_preferida')
+        # Métricas de reservas
+        # Contar reservas activas: estados pendientes o confirmadas para check-in.
+        # Alineamos al día local actual: consideramos reservas con llegada hoy o futura.
+        reservas_qs = Reserva.objects.filter(
+            estado__in=[Reserva.Estado.PENDIENTE, Reserva.Estado.CONFIRMADA_CHECKIN],
+            fecha_llegada_estimada__gte=hoy
+        )
+        reservas_activas_count = reservas_qs.count()
+        monto_custodia = reservas_qs.aggregate(total=Sum('monto_garantia')).get('total') or Decimal('0')
+        reservas_vencidas_count = Reserva.objects.filter(estado=Reserva.Estado.VENCIDA_REEMBOLSO).count()
         productos_stock_bajo = Producto.objects.filter(activo=True, stock_actual__lte=F('stock_minimo')).order_by('nombre')
         
         # Aplicar filtrado de movimientos según el rol del usuario
@@ -95,6 +105,8 @@ class DashboardView(APIView):
                 'disponibles': habitaciones.filter(estado_ocupacion=Habitacion.EstadoOcupacion.DISPONIBLE).count(),
                 'limpieza': habitaciones.filter(estado_limpieza=Habitacion.EstadoLimpieza.SUCIO).count(),
                 'mantenimiento': habitaciones.filter(estado_ocupacion=Habitacion.EstadoOcupacion.BLOQUEADO).count(),
+                # Añadido: conteo de habitaciones reservadas para Panel de Recepción
+                'reservadas': habitaciones.filter(estado_ocupacion=Habitacion.EstadoOcupacion.RESERVADO).count(),
             },
             'ingresos_hoy': {
                 'hotel': ingresos_hotel,
@@ -125,6 +137,14 @@ class DashboardView(APIView):
                 }
                 for reserva in reservas_hoy[:10]
             ],
+            # Compatibilidad hacia atrás: mantenemos el objeto `reservas` y añadimos claves top-level
+            'reservas': {
+                'activas': reservas_activas_count,
+                'monto_custodia': monto_custodia,
+                'vencidas': reservas_vencidas_count,
+            },
+            'reservas_activas': reservas_activas_count,
+            'monto_custodia': monto_custodia,
             'grafico_pagos': {
                 'efectivo': pagos_efectivo,
                 'yape': pagos_yape,

@@ -112,6 +112,8 @@ class CheckIn(BaseModel):
 	monto_deuda = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 	estado = models.CharField(max_length=20, choices=Estado.choices, default=Estado.ACTIVO)
 	es_pareja = models.BooleanField(default=False)
+	# Vinculación opcional a una Reserva desde la cual se originó el Check-In
+	reserva = models.ForeignKey('Reserva', on_delete=models.SET_NULL, null=True, blank=True, related_name='checkins_from_reserva')
 
 	def __str__(self) -> str:
 		return f'CheckIn {self.habitacion.numero} - {self.huesped}'
@@ -153,9 +155,10 @@ class CargoAdicional(BaseModel):
 class Reserva(BaseModel):
 	class Estado(models.TextChoices):
 		PENDIENTE = 'PENDIENTE', 'Pendiente'
-		CONFIRMADA = 'CONFIRMADA', 'Confirmada'
-		CANCELADA = 'CANCELADA', 'Cancelada'
+		CONFIRMADA_CHECKIN = 'CONFIRMADA_CHECKIN', 'Confirmada (Check-in)'
 		COMPLETADA = 'COMPLETADA', 'Completada'
+		VENCIDA_REEMBOLSO = 'VENCIDA_REEMBOLSO', 'Vencida / Reembolso'
+		CANCELADA = 'CANCELADA', 'Cancelada'
 
 	class AlertaColor(models.TextChoices):
 		ROJO = 'ROJO', 'Rojo'
@@ -173,6 +176,8 @@ class Reserva(BaseModel):
 	hora_llegada_estimada = models.TimeField()
 	monto_adelanto = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 	tipo_pago_adelanto = models.CharField(max_length=20, choices=TipoPagoAdelanto.choices)
+	# Monto fijo de garantía por reserva (S/ 20.00)
+	monto_garantia = models.DecimalField(max_digits=10, decimal_places=2, default=20.00)
 	estado = models.CharField(max_length=20, choices=Estado.choices, default=Estado.PENDIENTE)
 	notas = models.TextField(blank=True)
 	alerta_color = models.CharField(max_length=20, choices=AlertaColor.choices, default=AlertaColor.AMARILLO)

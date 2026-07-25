@@ -268,17 +268,28 @@ class DashboardStatsView(APIView):
         ocupadas = Habitacion.objects.filter(estado_ocupacion='OCUPADO').count()
         disponibles = Habitacion.objects.filter(estado_ocupacion='DISPONIBLE').exclude(estado_limpieza='SUCIO').count()
         limpieza = Habitacion.objects.filter(estado_limpieza='SUCIO').count()
+        # Contar habitaciones con estado RESERVADO (visibles para Recepción)
+        reservadas = Habitacion.objects.filter(estado_ocupacion=Habitacion.EstadoOcupacion.RESERVADO).count()
 
         # 3. CORRECCIÓN ROBUSTA: Deudas pendientes SOLO de CheckIn activos sin salida
         # Lógica:
         # - Solo contar CheckIn con estado=ACTIVO
         # - Adicional: validar que fecha_salida_real sea NULL (no ha salido realmente)
         # - Sumar monto_deuda de estos CheckIn
-        from hotel.models import CheckIn
-        
+        from hotel.models import CheckIn, Reserva
+
         suma_deudas_activas = CheckIn.objects.filter(
             Q(estado=CheckIn.Estado.ACTIVO) & Q(fecha_salida_real__isnull=True)
         ).aggregate(total=Sum('monto_deuda'))['total'] or 0
+
+        # Contar reservas activas (pendientes o confirmadas para check-in).
+        # Alineamos al día local: consideramos reservas cuya llegada es hoy o futura.
+        reservas_qs = Reserva.objects.filter(
+            estado__in=[Reserva.Estado.PENDIENTE, Reserva.Estado.CONFIRMADA_CHECKIN],
+            fecha_llegada_estimada__gte=hoy
+        )
+        reservas_activas_count = reservas_qs.count()
+        monto_custodia = reservas_qs.aggregate(total=Sum('monto_garantia')).get('total') or 0
 
         productos_vendidos_hoy = DetalleVenta.objects.filter(
             venta__fecha=hoy
@@ -293,7 +304,8 @@ class DashboardStatsView(APIView):
                 "total": total_habs,
                 "ocupadas": ocupadas,
                 "disponibles": disponibles,
-                "limpieza": limpieza
+                "limpieza": limpieza,
+                "reservadas": reservadas,
             },
             "ingresosDia": float(total_ingresos),
             "cajaActiva": caja_activa_existe,
@@ -304,6 +316,9 @@ class DashboardStatsView(APIView):
                 {"nombre": item["nombre"], "cantidad": item["cantidad"]}
                 for item in productos_vendidos_hoy
             ]
+            ,
+            "reservas_activas": reservas_activas_count,
+            "monto_custodia": float(monto_custodia),
         })
 
 class MovimientoCajaViewSet(viewsets.ModelViewSet):
