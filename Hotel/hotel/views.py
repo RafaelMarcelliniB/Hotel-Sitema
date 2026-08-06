@@ -90,15 +90,9 @@ def _calcular_resumen_checkin(checkin):
         Q(checkin_vinculado=checkin) | Q(dni_conductor=checkin.huesped.dni_pasaporte)
     )
 
-    for v in vehiculos:
-        if v.fecha_salida is not None and v.monto_total is not None:
-            subtotal_cochera += Decimal(str(v.monto_total))
-        else:
-            try:
-                monto_actual = cochera_service._calcular_monto(v.tarifa_tipo, v.fecha_entrada, v.hora_entrada)
-                subtotal_cochera += Decimal(str(monto_actual))
-            except Exception:
-                subtotal_cochera += Decimal(str(v.monto_total or 0))
+    # Para huéspedes del hotel, la cochera es cortesía: no se factura.
+    if vehiculos.exists():
+        subtotal_cochera = Decimal('0')
 
     total_general = subtotal_habitacion + subtotal_adicionales + subtotal_market + subtotal_cochera
     return {
@@ -148,12 +142,13 @@ def _serializar_detalle_checkin(checkin):
     )
 
     for v in vehiculos_query:
-        monto_final = v.monto_total
-        if v.fecha_salida is None:
-            try:
-                monto_final = cochera_service._calcular_monto(v.tarifa_tipo, v.fecha_entrada, v.hora_entrada)
-            except Exception:
-                monto_final = v.monto_total
+        monto_final = Decimal('0')
+
+        # La cochera es cortesía para vehículos vinculados a huéspedes del hotel.
+        if v.fecha_salida is not None and v.monto_total is not None:
+            monto_final = Decimal('0')
+        elif v.fecha_salida is None:
+            monto_final = Decimal('0')
 
         vehiculos.append({
             'id': v.id,
@@ -166,7 +161,7 @@ def _serializar_detalle_checkin(checkin):
             'fecha_salida': v.fecha_salida,
             'hora_salida': v.hora_salida,
             'tarifa_tipo': v.tarifa_tipo,
-            'monto_total': float(monto_final or 0),
+            'monto_total': float(monto_final),
             'tipo_cliente': getattr(v, 'tipo_cliente', None),
             'espacio_numero': getattr(v.espacio, 'numero', None),
         })
@@ -531,12 +526,7 @@ class CheckOutCreateView(APIView):
         except Exception:
             subtotal_market = Decimal('0.00')
 
-        subtotal_cochera = sum(
-            (v.monto_total for v in RegistroVehiculo.objects.filter(
-                Q(checkin_vinculado_id=checkin_id) | Q(dni_conductor=checkin.huesped.dni_pasaporte)
-            ) if v.monto_total is not None),
-            Decimal('0.00')
-        )
+        subtotal_cochera = Decimal('0.00')
 
         total_general_decimal = subtotal_habitacion + subtotal_adicionales + subtotal_market + subtotal_cochera
 

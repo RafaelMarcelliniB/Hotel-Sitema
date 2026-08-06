@@ -1,9 +1,25 @@
 import { useState } from 'react'
 import { useCajas } from '../hooks/useCajas'
+import { downloadCajaReporte } from '../api/reportesApi'
 import { Modal } from '../components/ui/Modal'
 import Button from '../components/ui/Button'
 import Card from '../components/ui/Card'
 import ModalAperturaCaja from '../components/caja/ModalAperturaCaja'
+
+const getFileNameFromContentDisposition = (contentDisposition) => {
+  if (!contentDisposition) return null
+
+  const filenameRegex = /filename\*?=(?:UTF-8''|"|')?([^;"']+)/i
+  const match = filenameRegex.exec(contentDisposition)
+  if (!match) return null
+
+  const rawFileName = match[1].replace(/^("|')|("|')$/g, '')
+  try {
+    return decodeURIComponent(rawFileName)
+  } catch (error) {
+    return rawFileName
+  }
+}
 
 // Componente simple para mostrar estados de carga
 const Spinner = () => (
@@ -15,6 +31,7 @@ export default function Caja() {
   const { useResumen, cerrarCaja, isLoading: loadingHook } = useCajas()
   const { data: resumen, isLoading: loadingResumen, error } = useResumen()
   const [showApertura, setShowApertura] = useState(false)
+  const [isDownloading, setIsDownloading] = useState(false)
 
   // 1. Estado de carga inicial
   if (loadingHook || loadingResumen) {
@@ -64,22 +81,65 @@ export default function Caja() {
             </p>
             <span className="text-slate-300">|</span>
             <p className="text-sm text-slate-600">
-              Apertura: {new Date(resumen.caja.fecha_apertura).toLocaleDateString()}
+              Apertura: {(() => {
+                const raw = resumen.caja.fecha_apertura
+                if (!raw) return ''
+                // Evitar desfase UTC cuando backend envía 'YYYY-MM-DD'
+                const iso = (typeof raw === 'string' && raw.length === 10) ? `${raw}T00:00:00` : raw
+                try {
+                  const d = new Date(iso)
+                  // Forzar visualización en zona local del navegador
+                  return d.toLocaleDateString('es-PE')
+                } catch (e) {
+                  return raw
+                }
+              })()}
             </p>
           </div>
         </div>
         
-        <Button 
-          variant="danger" 
-          onClick={() => {
-            if(window.confirm("¿Estás seguro que deseas cerrar el turno actual?")) {
-              cerrarCaja({})
-            }
-          }}
-          className="bg-red-600 hover:bg-red-700 text-white"
-        >
-          Finalizar Turno
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="secondary"
+            onClick={async () => {
+              if (!resumen?.caja?.id) return
+              try {
+                setIsDownloading(true)
+                const { blob, headers } = await downloadCajaReporte(resumen.caja.id)
+                const fileName = getFileNameFromContentDisposition(headers?.['content-disposition']) || `reporte_caja_${resumen.caja.id}.xlsx`
+                const url = window.URL.createObjectURL(new Blob([blob]))
+                const link = document.createElement('a')
+                link.href = url
+                link.setAttribute('download', fileName)
+                document.body.appendChild(link)
+                link.click()
+                link.parentNode.removeChild(link)
+                window.URL.revokeObjectURL(url)
+              } catch (err) {
+                console.error(err)
+                alert('Error al generar el reporte.')
+              } finally {
+                setIsDownloading(false)
+              }
+            }}
+            disabled={isDownloading}
+            className="mr-2"
+          >
+            {isDownloading ? 'Generando...' : 'Generar Reporte de Ventas'}
+          </Button>
+
+          <Button 
+            variant="danger" 
+            onClick={() => {
+              if(window.confirm("¿Estás seguro que deseas cerrar el turno actual?")) {
+                cerrarCaja({})
+              }
+            }}
+            className="bg-red-600 hover:bg-red-700 text-white"
+          >
+            Finalizar Turno
+          </Button>
+        </div>
       </div>
 
       {/* Tarjetas de Totales - Ajustado de lg:grid-cols-4 a lg:grid-cols-5 */}

@@ -9,6 +9,7 @@ import { useDashboard, useCajaResumen } from '../hooks/useDashboard'
 import { useTrabajadores } from '../hooks/useTrabajadores'
 import { Button } from '../components/ui/Button'
 import { useAuthStore } from '../store/authStore'
+import { downloadReporteVentas } from '../api/reportesApi'
 
 const TURNOS = [
   { value: 'mañana', label: 'Mañana' },
@@ -25,6 +26,18 @@ const PERIODOS = [
   { value: 'mes', label: 'Este mes' },
   { value: 'personalizado', label: 'Rango personalizado' },
 ]
+
+const slugifyFilename = (value) => {
+  if (!value) return ''
+  return value
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_-]+/g, '')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
 
 export default function Dashboard() {
   const user = useAuthStore((state) => state.user)
@@ -49,6 +62,61 @@ export default function Dashboard() {
     if (turno) params.turno = turno
     return params
   }, [periodo, fechaInicio, fechaFin, trabajadorId, turno])
+
+  const [isDownloading, setIsDownloading] = useState(false)
+  async function handleGenerarReporte() {
+    try {
+      setIsDownloading(true)
+      const params = { ...filterParams }
+      const response = await downloadReporteVentas(params)
+      const blob = response.blob
+      const disposition = response.headers?.['content-disposition'] || response.headers?.['Content-Disposition']
+
+      const selectedTrabajador = trabajadores.find((trabajador) => String(trabajador.id) === String(trabajadorId))
+      const nombreTrabajadorRaw = selectedTrabajador
+        ? `${selectedTrabajador.nombre || selectedTrabajador.username || ''} ${selectedTrabajador.apellido || ''}`.trim()
+        : 'todos'
+      const nombreTrabajador = slugifyFilename(nombreTrabajadorRaw) || 'todos'
+      const turnoTxt = slugifyFilename(turno || 'general') || 'general'
+
+      let fechaTxt = periodo || 'hoy'
+      if (periodo === 'personalizado') {
+        if (fechaInicio && fechaFin) {
+          fechaTxt = fechaInicio === fechaFin ? fechaInicio : `${fechaInicio}_a_${fechaFin}`
+        } else if (fechaInicio) {
+          fechaTxt = fechaInicio
+        } else if (fechaFin) {
+          fechaTxt = fechaFin
+        } else {
+          fechaTxt = 'personalizado'
+        }
+      }
+      fechaTxt = slugifyFilename(fechaTxt) || 'hoy'
+
+      const fallbackFileName = `reporte_trabajador_${nombreTrabajador}_${turnoTxt}_${fechaTxt}.xlsx`
+      let fileName = fallbackFileName
+      if (disposition) {
+        const matches = /filename="?(?<name>[^";]+)"?/.exec(disposition)
+        if (matches?.groups?.name) {
+          fileName = matches.groups.name
+        }
+      }
+
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', fileName)
+      document.body.appendChild(link)
+      link.click()
+      link.parentNode.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error(err)
+      alert('Error al generar el reporte.')
+    } finally {
+      setIsDownloading(false)
+    }
+  }
 
   const { data: resumenData, isLoading: isLoadingResumen, refetch: refetchResumen } = useCajaResumen(filterParams)
 
@@ -299,6 +367,11 @@ export default function Dashboard() {
             <Button variant="secondary" size="sm" onClick={handleResetFilters} className="min-w-[130px]">
               Limpiar filtros
             </Button>
+            {isAdmin && (
+              <Button size="sm" variant="primary" onClick={handleGenerarReporte} className="min-w-[200px]">
+                {isDownloading ? 'Generando...' : 'Generar Reporte de Trabajador'}
+              </Button>
+            )}
           </div>
 
           {/* Fila 2: Rango de fechas personalizado - Solo visible cuando se selecciona 'personalizado' */}

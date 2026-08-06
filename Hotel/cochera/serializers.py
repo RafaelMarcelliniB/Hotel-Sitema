@@ -58,6 +58,25 @@ class RegistroVehiculoIngresoSerializer(serializers.Serializer):
     checkin_vinculado_id = serializers.IntegerField(required=False, allow_null=True)
     espacio_id = serializers.IntegerField()
     tarifa_tipo = serializers.ChoiceField(choices=RegistroVehiculo.TarifaTipo.choices)
+    monto = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0, required=False, default=0)
+    detalle_tiempo = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    es_huesped = serializers.BooleanField(required=False, default=False)
+
+    def validate(self, attrs):
+        tipo_cliente = attrs.get('tipo_cliente')
+        monto = attrs.get('monto', 0)
+        checkin_vinculado_id = attrs.get('checkin_vinculado_id')
+
+        if tipo_cliente == RegistroVehiculo.TipoCliente.HUESPED:
+            if monto and monto != 0:
+                raise serializers.ValidationError('Para huésped el monto debe ser 0.00.')
+            if not checkin_vinculado_id:
+                raise serializers.ValidationError('Debe vincular un check-in para un huésped.')
+        else:
+            if monto is None or monto == 0:
+                raise serializers.ValidationError('Para público general el monto debe ser mayor a 0.')
+
+        return attrs
 
 
 class RegistroVehiculoSalidaSerializer(serializers.Serializer):

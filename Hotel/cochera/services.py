@@ -1,6 +1,9 @@
+from decimal import Decimal
+
 from django.db import transaction
 from django.utils import timezone
 
+from caja.models import Caja, MovimientoCaja
 from core.base_services import BaseService
 from cochera.models import EspacioCochera, RegistroVehiculo
 from cochera.repositories import EspacioCocheraRepository, RegistroVehiculoRepository
@@ -17,6 +20,27 @@ class RegistroVehiculoService(BaseService):
     def __init__(self):
         super().__init__()
         self.espacio_repo = EspacioCocheraRepository()
+
+    def _obtener_caja_activa(self, trabajador):
+        hoy = timezone.localdate()
+        filtros = {
+            'trabajador': trabajador,
+            'estado': Caja.Estado.ABIERTA,
+            'fecha_apertura': hoy,
+        }
+        turno_usuario = getattr(trabajador, 'turno', None)
+        if turno_usuario:
+            filtros['turno'] = turno_usuario
+
+        caja = Caja.objects.filter(**filtros).order_by('-fecha_apertura', '-hora_apertura').first()
+        if caja:
+            return caja
+
+        return Caja.objects.filter(
+            trabajador=trabajador,
+            estado=Caja.Estado.ABIERTA,
+            fecha_apertura=hoy,
+        ).order_by('-fecha_apertura', '-hora_apertura').first()
 
     def _calcular_monto(self, tarifa_tipo, fecha_entrada, hora_entrada):
         ahora = timezone.localtime()
@@ -55,6 +79,15 @@ class RegistroVehiculoService(BaseService):
             raise ValueError(f"El espacio {espacio.numero} ya está ocupado.")
 
         #Crea el registro de entrada
+        monto = Decimal(str(vehiculo_data.pop('monto', 0) or 0))
+        detalle_tiempo = vehiculo_data.pop('detalle_tiempo', '').strip()
+        es_huesped = bool(vehiculo_data.pop('es_huesped', False))
+
+        if vehiculo_data.get('tipo_cliente') == RegistroVehiculo.TipoCliente.HUESPED:
+            monto = Decimal('0')
+
+        vehiculo_data['monto_total'] = monto
+
         registro = self.repository.create(
             **vehiculo_data,
             espacio=espacio,
@@ -65,6 +98,25 @@ class RegistroVehiculoService(BaseService):
 
         #Actualiza estado del espacio
         self.espacio_repo.update(espacio.id, estado=EspacioCochera.Estado.OCUPADO)
+
+        if monto > 0:
+            caja_activa = self._obtener_caja_activa(trabajador)
+            if not caja_activa:
+                raise ValueError('No existe una caja abierta para registrar el cobro de cochera.')
+
+            MovimientoCaja.objects.create(
+                caja=caja_activa,
+                trabajador=caja_activa.trabajador,
+                turno=caja_activa.turno,
+                bloqueado=False,
+                tipo=MovimientoCaja.Tipo.INGRESO,
+                tipo_caja=MovimientoCaja.TipoCaja.EFECTIVO,
+                modulo=MovimientoCaja.Modulo.COCHERA,
+                referencia=registro.placa,
+                monto=monto,
+                descripcion=f'Ingreso vehículo {registro.placa} - Público General ({detalle_tiempo or "Cobro manual"})',
+                pagada=True,
+            )
         
         return registro
 
@@ -75,27 +127,23 @@ class RegistroVehiculoService(BaseService):
         
         if registro.fecha_salida:
             raise ValueError("Este vehículo ya registró su salida.")
-        # Calcular el monto usando la lógica de negocio
-        monto_calculado = self._calcular_monto(
+
+        monto_calculado = registro.monto_total if registro.monto_total and registro.monto_total > 0 else self._calcular_monto(
             registro.tarifa_tipo,
             registro.fecha_entrada,
             registro.hora_entrada,
         )
 
-        # Convertir a Decimal por consistencia
         try:
-            from decimal import Decimal
             monto_calculado = Decimal(str(monto_calculado))
         except Exception:
             pass
 
-        # Actualiza la instancia y persiste
         registro.fecha_salida = timezone.localdate()
         registro.hora_salida = timezone.localtime().time()
         registro.monto_total = monto_calculado
         registro.save()
 
-        # Libera el espacio de cochera
         if getattr(registro, 'espacio', None):
             self.espacio_repo.update(registro.espacio.id, estado=EspacioCochera.Estado.LIBRE)
 

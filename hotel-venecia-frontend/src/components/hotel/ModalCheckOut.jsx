@@ -123,7 +123,7 @@ export default function ModalCheckOut({ habitacion, onClose, onSuccess }) {
                       <div className="font-semibold">{v.placa} {v.tipo_cliente === 'HUESPED' ? '(Huésped)' : ''}</div>
                       <div className="text-xs text-slate-500">{v.tipo_vehiculo} • Espacio #{v.espacio_numero || 'N/A'}</div>
                     </div>
-                    <div className="font-bold">S/ {v.monto_total || '0.00'}</div>
+                    <div className="font-bold text-emerald-700">S/ {Number(v.monto_total || 0).toFixed(2)} {Number(v.monto_total || 0) === 0 ? '(Cortesía)' : ''}</div>
                   </div>
                 ))}
               </div>
