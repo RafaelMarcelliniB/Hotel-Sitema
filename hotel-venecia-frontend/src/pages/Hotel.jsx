@@ -3,6 +3,7 @@ import { useHabitaciones } from '../hooks/useHabitaciones'
 import HabitacionCard from '../components/hotel/HabitacionCard'
 import ModalCheckIn from '../components/hotel/ModalCheckIn'
 import ModalCheckOut from '../components/hotel/ModalCheckOut' 
+import ModalProcesarReserva from '../components/reservas/ModalProcesarReserva'
 import Spinner from '../components/ui/Spinner'
 import api from '../api/axiosConfig' 
 
@@ -11,6 +12,8 @@ export default function Hotel() {
   const [selectedHab, setSelectedHab] = useState(null)
   const [showCheckIn, setShowCheckIn] = useState(false)
   const [showCheckOut, setShowCheckOut] = useState(false) 
+  const [showProcesarReserva, setShowProcesarReserva] = useState(false)
+  const [checkInInitialData, setCheckInInitialData] = useState(null)
 
   // Nueva función para consumir el endpoint de limpieza que tienes en Django
   const handleTerminarLimpieza = async (habitacionId, numeroHabitacion) => {
@@ -39,11 +42,19 @@ export default function Hotel() {
       setSelectedHab(hab);
       setShowCheckOut(true);
       setShowCheckIn(false);
+      setShowProcesarReserva(false);
     } 
     // 2. SEGUNDA VALIDACIÓN: Si NO está ocupada pero está SUCIA, se dispara la limpieza
     else if (hab.estado_limpieza === 'SUCIO') {
       handleTerminarLimpieza(hab.id, hab.numero);
     } 
+    // 2.5 Si está RESERVADO, abrimos modal para procesar check-in desde la reserva
+    else if (hab.estado_ocupacion === 'RESERVADO') {
+      setSelectedHab(hab);
+      setShowProcesarReserva(true);
+      setShowCheckIn(false);
+      setShowCheckOut(false);
+    }
     // 3. TERCERA OPCIÓN: Si está limpia y libre, se abre el Check-In para alquilarla
     else {
       setSelectedHab(hab);
@@ -56,12 +67,36 @@ export default function Hotel() {
     setShowCheckIn(false);
     setShowCheckOut(false);
     setSelectedHab(null);
+    setCheckInInitialData(null)
   };
 
   const handleSuccess = () => {
     handleCloseModals();
     refetch(); // Refresca el mapa para ver los cambios de colores
   };
+
+  const handleProcesarSuccess = () => {
+    setShowProcesarReserva(false)
+    setSelectedHab(null)
+    refetch()
+  }
+
+  const handleOpenCheckInFromReserva = (payload) => {
+    // payload expected: { habitacion, cliente_nombre, cliente_apellido, cliente_dni, cliente_telefono, monto_adelanto, garantia, habitacion_id }
+    setSelectedHab(payload.habitacion || selectedHab)
+    setCheckInInitialData({
+      huesped: {
+        nombre: payload.cliente_nombre || '',
+        apellido: payload.cliente_apellido || '',
+        dni_pasaporte: payload.cliente_dni || '',
+        telefono: payload.cliente_telefono || ''
+      },
+      monto_pagado: payload.monto_adelanto ?? payload.garantia ?? 0,
+      garantia: payload.garantia ?? 0
+    })
+    setShowProcesarReserva(false)
+    setShowCheckIn(true)
+  }
 
   if (isLoading) return (
     <div className="flex h-screen items-center justify-center">
@@ -92,6 +127,7 @@ export default function Hotel() {
           habitacion={selectedHab} 
           onClose={handleCloseModals}
           onSuccess={handleSuccess}
+          initialData={checkInInitialData}
         />
       )}
 
@@ -101,6 +137,16 @@ export default function Hotel() {
           habitacion={selectedHab} 
           onClose={handleCloseModals}
           onSuccess={handleSuccess}
+        />
+      )}
+
+      {showProcesarReserva && selectedHab && (
+        <ModalProcesarReserva
+          habitacion={selectedHab}
+          isOpen={showProcesarReserva}
+          onClose={() => setShowProcesarReserva(false)}
+          onSuccess={handleProcesarSuccess}
+          onOpenCheckIn={handleOpenCheckInFromReserva}
         />
       )}
     </div>

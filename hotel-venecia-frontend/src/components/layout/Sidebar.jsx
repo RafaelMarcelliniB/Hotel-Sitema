@@ -5,6 +5,7 @@ function buildLinksForRole(role) {
     const all = [
     { to: '/', label: 'Dashboard' },
     { to: '/hotel', label: 'Hotel' },
+    { to: '/reservas', label: 'Reservas' },
     { to: '/market', label: 'Market' },
     { to: '/cochera', label: 'Cochera' },
     { to: '/caja', label: 'Caja' },
@@ -16,7 +17,7 @@ function buildLinksForRole(role) {
 
   const r = role.toLowerCase()
   if (r === 'admin') return all
-  if (r === 'recepcionista') return all.filter(l => ['/','/hotel','/cochera','/caja','/recados'].includes(l.to))
+  if (r === 'recepcionista') return all.filter(l => ['/', '/reservas', '/hotel','/cochera','/caja','/recados'].includes(l.to))
   if (r === 'cajero') return [{ to: '/', label: 'Dashboard' }, { to: '/market', label: 'Market' }, { to: '/caja?module=market', label: 'Caja (Market)' }, { to: '/recados', label: 'Recados' }]
   return [{ to: '/', label: 'Dashboard' }]
 }

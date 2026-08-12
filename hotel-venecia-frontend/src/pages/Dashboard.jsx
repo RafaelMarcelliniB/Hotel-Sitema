@@ -9,6 +9,7 @@ import { useDashboard, useCajaResumen } from '../hooks/useDashboard'
 import { useTrabajadores } from '../hooks/useTrabajadores'
 import { Button } from '../components/ui/Button'
 import { useAuthStore } from '../store/authStore'
+import { downloadReporteVentas } from '../api/reportesApi'
 
 const TURNOS = [
   { value: 'mañana', label: 'Mañana' },
@@ -25,6 +26,18 @@ const PERIODOS = [
   { value: 'mes', label: 'Este mes' },
   { value: 'personalizado', label: 'Rango personalizado' },
 ]
+
+const slugifyFilename = (value) => {
+  if (!value) return ''
+  return value
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_-]+/g, '')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
 
 export default function Dashboard() {
   const user = useAuthStore((state) => state.user)
@@ -49,6 +62,61 @@ export default function Dashboard() {
     if (turno) params.turno = turno
     return params
   }, [periodo, fechaInicio, fechaFin, trabajadorId, turno])
+
+  const [isDownloading, setIsDownloading] = useState(false)
+  async function handleGenerarReporte() {
+    try {
+      setIsDownloading(true)
+      const params = { ...filterParams }
+      const response = await downloadReporteVentas(params)
+      const blob = response.blob
+      const disposition = response.headers?.['content-disposition'] || response.headers?.['Content-Disposition']
+
+      const selectedTrabajador = trabajadores.find((trabajador) => String(trabajador.id) === String(trabajadorId))
+      const nombreTrabajadorRaw = selectedTrabajador
+        ? `${selectedTrabajador.nombre || selectedTrabajador.username || ''} ${selectedTrabajador.apellido || ''}`.trim()
+        : 'todos'
+      const nombreTrabajador = slugifyFilename(nombreTrabajadorRaw) || 'todos'
+      const turnoTxt = slugifyFilename(turno || 'general') || 'general'
+
+      let fechaTxt = periodo || 'hoy'
+      if (periodo === 'personalizado') {
+        if (fechaInicio && fechaFin) {
+          fechaTxt = fechaInicio === fechaFin ? fechaInicio : `${fechaInicio}_a_${fechaFin}`
+        } else if (fechaInicio) {
+          fechaTxt = fechaInicio
+        } else if (fechaFin) {
+          fechaTxt = fechaFin
+        } else {
+          fechaTxt = 'personalizado'
+        }
+      }
+      fechaTxt = slugifyFilename(fechaTxt) || 'hoy'
+
+      const fallbackFileName = `reporte_trabajador_${nombreTrabajador}_${turnoTxt}_${fechaTxt}.xlsx`
+      let fileName = fallbackFileName
+      if (disposition) {
+        const matches = /filename="?(?<name>[^";]+)"?/.exec(disposition)
+        if (matches?.groups?.name) {
+          fileName = matches.groups.name
+        }
+      }
+
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', fileName)
+      document.body.appendChild(link)
+      link.click()
+      link.parentNode.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error(err)
+      alert('Error al generar el reporte.')
+    } finally {
+      setIsDownloading(false)
+    }
+  }
 
   const { data: resumenData, isLoading: isLoadingResumen, refetch: refetchResumen } = useCajaResumen(filterParams)
 
@@ -203,22 +271,22 @@ export default function Dashboard() {
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <Card className="border-l-4 border-l-blue-500">
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total Habitaciones</p>
-            <p className="mt-3 text-4xl font-black text-slate-900">{habitaciones.total || 0}</p>
+            <p className="mt-3 text-4xl font-black text-blue-600">{habitaciones.total || 0}</p>
           </Card>
 
-          <Card className="border-l-4 border-l-green-500">
+          <Card className="border-l-4 border-l-rose-500">
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Ocupadas</p>
-            <p className="mt-3 text-4xl font-black text-green-600">{habitaciones.ocupadas || 0}</p>
+            <p className="mt-3 text-4xl font-black text-rose-600">{habitaciones.ocupadas || 0}</p>
           </Card>
 
-          <Card className="border-l-4 border-l-orange-500">
+          <Card className="border-l-4 border-l-emerald-500">
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Disponibles</p>
-            <p className="mt-3 text-4xl font-black text-orange-600">{habitaciones.disponibles || 0}</p>
+            <p className="mt-3 text-4xl font-black text-emerald-600">{habitaciones.disponibles || 0}</p>
           </Card>
 
-          <Card className="border-l-4 border-l-slate-700">
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Checkouts Hoy</p>
-            <p className="mt-3 text-4xl font-black text-slate-900">{data.proximosCheckouts || 0}</p>
+          <Card className="border-l-4 border-l-amber-500">
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">RESERVADAS</p>
+            <p className="mt-3 text-4xl font-black text-amber-600">{habitaciones.reservadas || 0}</p>
           </Card>
         </section>
 
@@ -238,9 +306,11 @@ export default function Dashboard() {
           <Card>
             <h3 className="text-lg font-bold text-slate-800 mb-4">Próximas Acciones</h3>
             <div className="space-y-4">
-              <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
-                <p className="text-xs uppercase tracking-wide text-blue-600">Checkouts del día</p>
-                <p className="mt-2 text-2xl font-bold text-blue-900">{data.proximosCheckouts || 0}</p>
+              <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4">
+                <p className="text-xs uppercase tracking-wide text-amber-600">RESERVAS ACTIVAS</p>
+                  <p className="mt-2 text-2xl font-bold text-amber-900">{data.reservas_activas ?? 0}</p>
+                  <p className="mt-1 text-sm text-amber-700">En custodia: S/ {Number(data.monto_custodia || 0).toFixed(2)}</p>
+                <Button className="mt-3 w-full" variant="secondary" onClick={() => window.location.href = '/reservas'}>Ir a Reservas</Button>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Producto más vendido</p>
@@ -297,6 +367,11 @@ export default function Dashboard() {
             <Button variant="secondary" size="sm" onClick={handleResetFilters} className="min-w-[130px]">
               Limpiar filtros
             </Button>
+            {isAdmin && (
+              <Button size="sm" variant="primary" onClick={handleGenerarReporte} className="min-w-[200px]">
+                {isDownloading ? 'Generando...' : 'Generar Reporte de Trabajador'}
+              </Button>
+            )}
           </div>
 
           {/* Fila 2: Rango de fechas personalizado - Solo visible cuando se selecciona 'personalizado' */}
@@ -317,7 +392,7 @@ export default function Dashboard() {
       </section>
 
       <section className="grid gap-4 xl:grid-cols-2">
-        {/* Tarjeta Principal: Ingresos con Desglose Integrado */}
+      {/* Tarjeta Principal: Ingresos con Desglose Integrado */}
         <Card className="bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-200 p-6 xl:col-span-1">
           <div className="flex items-start justify-between mb-4">
             <div>
@@ -345,6 +420,13 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
+        </Card>
+
+        <Card className="border-l-4 border-l-yellow-500">
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Reservas Activas</p>
+          <p className="mt-3 text-2xl font-black text-amber-700">{data.reservas_activas ?? 0} reservas</p>
+          <p className="mt-2 text-sm text-slate-600">En custodia: S/ {Number(data.monto_custodia || 0).toFixed(2)}</p>
+          <p className="mt-1 text-xs text-slate-500">Vencidas: {data.reservas?.vencidas ?? 0}</p>
         </Card>
 
       </section>
@@ -381,9 +463,11 @@ export default function Dashboard() {
         <Card>
           <h3 className="mb-4 text-lg font-bold text-slate-800">Próximas Acciones</h3>
           <div className="space-y-4">
-            <div className="flex justify-between items-center p-3 bg-yellow-50 rounded-lg border border-yellow-100">
-              <span className="text-sm font-medium text-yellow-800">Checkouts hoy</span>
-              <Badge variant="warning">{data.proximosCheckouts || 0}</Badge>
+            <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4">
+              <p className="text-xs uppercase tracking-wide text-amber-600">Reservas Activas</p>
+              <p className="mt-2 text-2xl font-bold text-amber-900">{data.reservas_activas ?? 0}</p>
+              <p className="mt-1 text-sm text-amber-700">En custodia: S/ {Number(data.monto_custodia || 0).toFixed(2)}</p>
+              <Button className="mt-3 w-full" variant="secondary" onClick={() => window.location.href = '/reservas'}>Ir a Reservas</Button>
             </div>
             <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
               <p className="text-xs text-blue-600 font-bold uppercase mb-1">Producto más vendido</p>

@@ -19,15 +19,15 @@ export default function CajaBlockedModal({ isOpen, onClose, onNavigateToCaja }) 
 
   return (
     <>
-      {/* Overlay */}
+      {/* Overlay (z-45) */}
       <div 
-        className="fixed inset-0 bg-slate-900/50 z-50 backdrop-blur-sm"
+        className="fixed inset-0 bg-slate-900/50 z-[45] backdrop-blur-sm"
         onClick={onClose}
       />
       
-      {/* Modal */}
+      {/* Modal (z-50) */}
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border-2 border-red-200 animate-in zoom-in duration-200">
+        <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border-2 border-red-200 animate-in zoom-in duration-200 z-50">
           
           {/* Header */}
           <div className="bg-gradient-to-r from-red-50 to-orange-50 px-6 py-4 border-b border-red-100 flex items-start gap-3">

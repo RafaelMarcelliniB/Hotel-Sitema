@@ -1,0 +1,3 @@
+Nombre,Categoria,Precio Unitario,Stock Actual,Stock Minimo,Tipo Registro,Activo
+Ejemplo Snack,Snack,3.50,10,2,Stock,SI
+Ejemplo Bebida,Bebida,2.00,20,5,Stock,SI

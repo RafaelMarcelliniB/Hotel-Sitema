@@ -9,6 +9,7 @@ from caja.views import (
 	HealthCajaView,
 	MovimientoCajaPagarDeudaView,
 	MovimientoCajaViewSet,
+    CajaReporteExcelView,
 )
 
 urlpatterns = [
@@ -21,6 +22,7 @@ urlpatterns = [
 	path('movimientos/<int:pk>/', MovimientoCajaViewSet.as_view({'get': 'retrieve', 'delete': 'destroy'}), name='movimientos-detail'),
 	path('movimientos/<int:movimiento_id>/pagar-deuda/', MovimientoCajaPagarDeudaView.as_view(), name='movimientos-pagar-deuda'),
 	path('health/', HealthCajaView.as_view(), name='caja-health'),
+    path('<int:caja_id>/reporte-excel/', CajaReporteExcelView.as_view(), name='caja-reporte-excel'),
 ]
 
 # ════════════════════════════════════════

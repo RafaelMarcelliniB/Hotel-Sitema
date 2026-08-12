@@ -126,21 +126,25 @@ class RegistroVehiculoSalidaView(APIView):
         registro = RegistroVehiculoService().registrar_salida(registro_id)
         metodo = request.data.get('metodo_pago', MovimientoCaja.TipoCaja.EFECTIVO)
 
-        caja_activa = Caja.objects.filter(estado=Caja.Estado.ABIERTA).order_by('-fecha_apertura', '-hora_apertura').first()
+        caja_activa = Caja.objects.filter(
+            trabajador=request.user,
+            estado=Caja.Estado.ABIERTA
+        ).order_by('-fecha_apertura', '-hora_apertura').first()
 
-        if caja_activa:
+        monto_mov = getattr(registro, 'monto_total', None)
+        try:
+            from decimal import Decimal
+            monto_mov = Decimal(str(monto_mov or 0))
+        except Exception:
+            monto_mov = None
+
+        if caja_activa and (monto_mov is None or monto_mov == 0):
             tipo_caja = MovimientoCaja.TipoCaja.EFECTIVO
             metodo_up = str(metodo).upper() if metodo else None
             if metodo_up in (MovimientoCaja.TipoCaja.EFECTIVO, MovimientoCaja.TipoCaja.YAPE, MovimientoCaja.TipoCaja.TARJETA):
                 tipo_caja = metodo_up
 
-            monto_mov = getattr(registro, 'monto_total', None)
-            try:
-                from decimal import Decimal
-                if monto_mov is None or Decimal(str(monto_mov)) == Decimal('0'):
-                    monto_mov = RegistroVehiculoService().calcular_monto_para_registro(registro.id)
-            except Exception:
-                monto_mov = RegistroVehiculoService().calcular_monto_para_registro(registro.id)
+            monto_mov = RegistroVehiculoService().calcular_monto_para_registro(registro.id)
 
             MovimientoCaja.objects.create(
                 caja=caja_activa,

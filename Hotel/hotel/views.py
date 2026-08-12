@@ -90,15 +90,9 @@ def _calcular_resumen_checkin(checkin):
         Q(checkin_vinculado=checkin) | Q(dni_conductor=checkin.huesped.dni_pasaporte)
     )
 
-    for v in vehiculos:
-        if v.fecha_salida is not None and v.monto_total is not None:
-            subtotal_cochera += Decimal(str(v.monto_total))
-        else:
-            try:
-                monto_actual = cochera_service._calcular_monto(v.tarifa_tipo, v.fecha_entrada, v.hora_entrada)
-                subtotal_cochera += Decimal(str(monto_actual))
-            except Exception:
-                subtotal_cochera += Decimal(str(v.monto_total or 0))
+    # Para huéspedes del hotel, la cochera es cortesía: no se factura.
+    if vehiculos.exists():
+        subtotal_cochera = Decimal('0')
 
     total_general = subtotal_habitacion + subtotal_adicionales + subtotal_market + subtotal_cochera
     return {
@@ -148,12 +142,13 @@ def _serializar_detalle_checkin(checkin):
     )
 
     for v in vehiculos_query:
-        monto_final = v.monto_total
-        if v.fecha_salida is None:
-            try:
-                monto_final = cochera_service._calcular_monto(v.tarifa_tipo, v.fecha_entrada, v.hora_entrada)
-            except Exception:
-                monto_final = v.monto_total
+        monto_final = Decimal('0')
+
+        # La cochera es cortesía para vehículos vinculados a huéspedes del hotel.
+        if v.fecha_salida is not None and v.monto_total is not None:
+            monto_final = Decimal('0')
+        elif v.fecha_salida is None:
+            monto_final = Decimal('0')
 
         vehiculos.append({
             'id': v.id,
@@ -166,7 +161,7 @@ def _serializar_detalle_checkin(checkin):
             'fecha_salida': v.fecha_salida,
             'hora_salida': v.hora_salida,
             'tarifa_tipo': v.tarifa_tipo,
-            'monto_total': float(monto_final or 0),
+            'monto_total': float(monto_final),
             'tipo_cliente': getattr(v, 'tipo_cliente', None),
             'espacio_numero': getattr(v.espacio, 'numero', None),
         })
@@ -305,18 +300,143 @@ class ReservaViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
         fecha = self.request.query_params.get('fecha')
+        habitacion_id = self.request.query_params.get('habitacion_id')
+        if habitacion_id:
+            try:
+                queryset = queryset.filter(habitacion_preferida_id=int(habitacion_id))
+            except Exception:
+                pass
         if fecha == 'hoy':
             fecha = timezone.localdate()
         if fecha:
             queryset = queryset.filter(fecha_llegada_estimada=fecha)
         return queryset
 
-    @action(detail=True, methods=['patch'], url_path='confirmar')
-    def confirmar(self, request, pk=None):
+    def create(self, request, *args, **kwargs):
+        # Crear reserva y marcar la habitación como RESERVADO
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reserva = serializer.save(trabajador=request.user)
+
+        # Marcar habitación como RESERVADO
+        try:
+            habitacion = reserva.habitacion_preferida
+            habitacion.estado_ocupacion = Habitacion.EstadoOcupacion.RESERVADO
+            habitacion.save(update_fields=['estado_ocupacion'])
+        except Exception:
+            pass
+
+        return Response(self.get_serializer(reserva).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'], url_path='vencidas')
+    def vencidas(self, request):
+        """Lista y marca reservas cuyo plazo de tolerancia ya venció (>= 4 horas desde la creación).
+        Maneja excepciones internamente y siempre retorna un array JSON válido.
+        """
+        from datetime import timedelta
+
+        try:
+            tolerancia_horas = 4
+            ahora = timezone.now()
+            umbral = ahora - timedelta(hours=tolerancia_horas)
+
+            pendientes = Reserva.objects.filter(estado=Reserva.Estado.PENDIENTE, created_at__lte=umbral).select_related('huesped', 'habitacion_preferida')
+            # Marcamos como vencidas para gestionar reembolso
+            pendientes.update(estado=Reserva.Estado.VENCIDA_REEMBOLSO)
+
+            result = []
+            for r in pendientes:
+                result.append({
+                    'id': r.id,
+                    'huesped': {
+                        'id': r.huesped.id,
+                        'nombre': r.huesped.nombre,
+                        'apellido': r.huesped.apellido,
+                        'dni_pasaporte': r.huesped.dni_pasaporte,
+                        'telefono': r.huesped.telefono,
+                    },
+                    'habitacion_preferida': r.habitacion_preferida.numero,
+                    'fecha_llegada_estimada': r.fecha_llegada_estimada,
+                    'hora_llegada_estimada': r.hora_llegada_estimada,
+                    'created_at': r.created_at,
+                    'monto_garantia': float(r.monto_garantia or 20.0),
+                })
+
+            return Response(result)
+        except Exception as e:
+            # Si ocurre algún error (p. ej. migraciones incompletas), retornamos lista vacía
+            return Response([], status=200)
+
+    @action(detail=False, methods=['get'], url_path='por_habitacion')
+    def por_habitacion(self, request):
+        """Retorna reservas (con datos anidados) para una habitación dada."""
+        try:
+            habitacion_id = request.query_params.get('habitacion_id')
+            if not habitacion_id:
+                return Response([], status=200)
+
+            # Filtrar únicamente reservas activas/pendientes para evitar retornar historiales
+            reservas = Reserva.objects.filter(
+                habitacion_preferida_id=habitacion_id,
+                estado=Reserva.Estado.PENDIENTE
+            ).select_related('huesped', 'habitacion_preferida')
+            result = []
+            for r in reservas:
+                result.append({
+                    'id': r.id,
+                    'huesped': {
+                        'id': r.huesped.id,
+                        'nombre': r.huesped.nombre,
+                        'apellido': r.huesped.apellido,
+                        'dni_pasaporte': r.huesped.dni_pasaporte,
+                        'telefono': r.huesped.telefono,
+                    },
+                    'habitacion_preferida': r.habitacion_preferida.numero,
+                    'fecha_llegada_estimada': r.fecha_llegada_estimada,
+                    'hora_llegada_estimada': r.hora_llegada_estimada,
+                    'created_at': r.created_at,
+                    'monto_garantia': float(r.monto_garantia or 20.0),
+                    'estado': r.estado,
+                })
+            return Response(result)
+        except Exception:
+            return Response([], status=200)
+
+    @action(detail=True, methods=['post'], url_path='checkin')
+    def checkin(self, request, pk=None):
+        """Convierte una reserva en un Check-in activo y transfiere la garantía a la caja."""
         reserva = self.get_object()
-        reserva.estado = Reserva.Estado.CONFIRMADA
+
+        if reserva.estado != Reserva.Estado.PENDIENTE:
+            return Response({'detail': 'La reserva no está en estado pendiente.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validar caja abierta similar a CheckInCreateView
+        if hasattr(request.user, 'rol') and request.user.rol != Trabajador.Rol.ADMIN:
+            caja_existe = _caja_activa(request.user) is not None
+            if not caja_existe:
+                raise ValidationError("Debe aperturar su caja de turno antes de realizar esta operación.")
+
+        # Construir datos mínimos para iniciar el check-in
+        data = {
+            'habitacion_id': reserva.habitacion_preferida.id,
+            'huesped_id': reserva.huesped.id,
+            'turno_ingreso': request.data.get('turno_ingreso', CheckIn.TurnoIngreso.NOCHE),
+            'tipo_pago': request.data.get('tipo_pago', CheckIn.TipoPago.EFECTIVO),
+            'monto_pagado': str(reserva.monto_garantia or 0),
+            # Marcar que el checkin proviene de una reserva y pasar el id para validación segura
+            'from_reserva': True,
+            'reserva_id': reserva.id,
+        }
+
+        try:
+            checkin = CheckInService().iniciar_alquiler(data, request.user)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        reserva.estado = Reserva.Estado.COMPLETADA
         reserva.save(update_fields=['estado'])
-        return Response(self.get_serializer(reserva).data)
+
+        return Response(_serializar_detalle_checkin(checkin), status=status.HTTP_201_CREATED)
 
 
 class CheckInCreateView(APIView):
@@ -342,7 +462,10 @@ class CheckInCreateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        checkin = CheckInService().iniciar_alquiler(serializer.validated_data, request.user)
+        try:
+            checkin = CheckInService().iniciar_alquiler(serializer.validated_data, request.user)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         tarifa = _tarifa_checkin(checkin)
         descuento = _to_decimal(serializer.validated_data.get('descuento', 0))
@@ -403,12 +526,7 @@ class CheckOutCreateView(APIView):
         except Exception:
             subtotal_market = Decimal('0.00')
 
-        subtotal_cochera = sum(
-            (v.monto_total for v in RegistroVehiculo.objects.filter(
-                Q(checkin_vinculado_id=checkin_id) | Q(dni_conductor=checkin.huesped.dni_pasaporte)
-            ) if v.monto_total is not None),
-            Decimal('0.00')
-        )
+        subtotal_cochera = Decimal('0.00')
 
         total_general_decimal = subtotal_habitacion + subtotal_adicionales + subtotal_market + subtotal_cochera
 

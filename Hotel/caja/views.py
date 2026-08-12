@@ -1,7 +1,10 @@
 from collections import defaultdict
 from datetime import date
+import re
+import unicodedata
 from django.utils import timezone
 from django.db.models import F, Sum, Q
+from django.contrib.auth import get_user_model
 
 from rest_framework import status, viewsets
 from rest_framework.permissions import IsAuthenticated
@@ -19,6 +22,12 @@ from caja.serializers import (
     MovimientoCajaSerializer,
 )
 from caja.services import CajaService, MovimientoCajaService
+
+import io
+from django.http import HttpResponse
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment
+from openpyxl.utils import get_column_letter
 
 
 
@@ -268,17 +277,28 @@ class DashboardStatsView(APIView):
         ocupadas = Habitacion.objects.filter(estado_ocupacion='OCUPADO').count()
         disponibles = Habitacion.objects.filter(estado_ocupacion='DISPONIBLE').exclude(estado_limpieza='SUCIO').count()
         limpieza = Habitacion.objects.filter(estado_limpieza='SUCIO').count()
+        # Contar habitaciones con estado RESERVADO (visibles para Recepción)
+        reservadas = Habitacion.objects.filter(estado_ocupacion=Habitacion.EstadoOcupacion.RESERVADO).count()
 
         # 3. CORRECCIÓN ROBUSTA: Deudas pendientes SOLO de CheckIn activos sin salida
         # Lógica:
         # - Solo contar CheckIn con estado=ACTIVO
         # - Adicional: validar que fecha_salida_real sea NULL (no ha salido realmente)
         # - Sumar monto_deuda de estos CheckIn
-        from hotel.models import CheckIn
-        
+        from hotel.models import CheckIn, Reserva
+
         suma_deudas_activas = CheckIn.objects.filter(
             Q(estado=CheckIn.Estado.ACTIVO) & Q(fecha_salida_real__isnull=True)
         ).aggregate(total=Sum('monto_deuda'))['total'] or 0
+
+        # Contar reservas activas (pendientes o confirmadas para check-in).
+        # Alineamos al día local: consideramos reservas cuya llegada es hoy o futura.
+        reservas_qs = Reserva.objects.filter(
+            estado__in=[Reserva.Estado.PENDIENTE, Reserva.Estado.CONFIRMADA_CHECKIN],
+            fecha_llegada_estimada__gte=hoy
+        )
+        reservas_activas_count = reservas_qs.count()
+        monto_custodia = reservas_qs.aggregate(total=Sum('monto_garantia')).get('total') or 0
 
         productos_vendidos_hoy = DetalleVenta.objects.filter(
             venta__fecha=hoy
@@ -293,7 +313,8 @@ class DashboardStatsView(APIView):
                 "total": total_habs,
                 "ocupadas": ocupadas,
                 "disponibles": disponibles,
-                "limpieza": limpieza
+                "limpieza": limpieza,
+                "reservadas": reservadas,
             },
             "ingresosDia": float(total_ingresos),
             "cajaActiva": caja_activa_existe,
@@ -304,6 +325,9 @@ class DashboardStatsView(APIView):
                 {"nombre": item["nombre"], "cantidad": item["cantidad"]}
                 for item in productos_vendidos_hoy
             ]
+            ,
+            "reservas_activas": reservas_activas_count,
+            "monto_custodia": float(monto_custodia),
         })
 
 class MovimientoCajaViewSet(viewsets.ModelViewSet):
@@ -351,6 +375,313 @@ class HealthCajaView(APIView):
 
     def get(self, request):
         return Response({'module': 'caja', 'status': 'ok'})
+
+
+def _slugify_filename_part(value):
+    if value is None:
+        return ''
+    value = str(value)
+    value = unicodedata.normalize('NFKD', value)
+    value = value.encode('ascii', 'ignore').decode('ascii')
+    value = value.replace(' ', '_').lower()
+    value = re.sub(r'[^a-z0-9_-]+', '', value)
+    return value.strip('_-')
+
+
+class CajaReporteExcelView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _auto_adjust_columns(self, ws):
+        for column_cells in ws.columns:
+            length = max(len(str(cell.value or "")) for cell in column_cells)
+            col_letter = get_column_letter(column_cells[0].column)
+            ws.column_dimensions[col_letter].width = min(50, length + 4)
+
+    def get(self, request, caja_id):
+        try:
+            caja = Caja.objects.get(pk=caja_id)
+        except Caja.DoesNotExist:
+            return Response({'detail': 'Caja no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        resumen = CajaService().obtener_resumen(caja)
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = 'Movimientos'
+
+        headers = ['Fecha / Hora', 'Módulo', 'Descripción', 'Tipo', 'Trabajador', 'Monto', 'Referencia', 'Detalle']
+        for col_idx, h in enumerate(headers, start=1):
+            cell = ws.cell(row=1, column=col_idx, value=h)
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal='center')
+
+        movimientos = resumen.get('movimientos', [])
+
+        def _field(mov, name, default=None):
+            if isinstance(mov, dict):
+                return mov.get(name, default)
+            return getattr(mov, name, default)
+
+        for row_idx, mov in enumerate(movimientos, start=2):
+            fecha_hora = _field(mov, 'fecha_hora')
+            # Si es datetime, formateamos; si es string lo dejamos
+            if fecha_hora and hasattr(fecha_hora, 'strftime'):
+                fecha_val = fecha_hora.strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                fecha_val = fecha_hora
+
+            descripcion = _field(mov, 'descripcion') or _field(mov, 'referencia')
+            trabajador = _field(mov, 'trabajador')
+            monto = _field(mov, 'monto') or 0
+            referencia = _field(mov, 'referencia')
+            detalle = _field(mov, 'detalle', '')
+            modulo = _field(mov, 'modulo')
+            tipo = _field(mov, 'tipo')
+
+            ws.cell(row=row_idx, column=1, value=fecha_val)
+            ws.cell(row=row_idx, column=2, value=modulo)
+            ws.cell(row=row_idx, column=3, value=descripcion)
+            ws.cell(row=row_idx, column=4, value=tipo)
+            ws.cell(row=row_idx, column=5, value=str(trabajador) if trabajador is not None else '')
+            try:
+                ws.cell(row=row_idx, column=6, value=float(monto))
+            except Exception:
+                ws.cell(row=row_idx, column=6, value=0)
+            ws.cell(row=row_idx, column=7, value=referencia)
+            ws.cell(row=row_idx, column=8, value=detalle)
+
+        # Totales
+        total_row = len(movimientos) + 3
+        ws.cell(row=total_row, column=5, value='Total').font = Font(bold=True)
+        ws.cell(row=total_row, column=6, value=float(resumen.get('total_general', 0))).font = Font(bold=True)
+
+        self._auto_adjust_columns(ws)
+
+        # Hoja adicional para Market (detalle de ventas del día de la caja)
+        ws2 = wb.create_sheet(title='Market')
+        ws2_headers = ['Fecha', 'Producto', 'Cantidad', 'Precio Unitario', 'Subtotal', 'Tipo Venta', 'Método Pago']
+        for col_idx, h in enumerate(ws2_headers, start=1):
+            cell = ws2.cell(row=1, column=col_idx, value=h)
+            cell.font = Font(bold=True)
+
+        # Intentamos obtener ventas market del mismo día y trabajador de la caja
+        ventas_detalles = DetalleVenta.objects.select_related('venta', 'producto').filter(
+            venta__fecha=caja.fecha_apertura,
+            venta__trabajador=caja.trabajador
+        )
+
+        for idx, det in enumerate(ventas_detalles, start=2):
+            ws2.cell(row=idx, column=1, value=str(det.venta.fecha))
+            ws2.cell(row=idx, column=2, value=det.producto.nombre)
+            ws2.cell(row=idx, column=3, value=det.cantidad)
+            ws2.cell(row=idx, column=4, value=float(det.precio_unitario))
+            ws2.cell(row=idx, column=5, value=float(det.subtotal))
+            ws2.cell(row=idx, column=6, value=det.venta.tipo_venta)
+            ws2.cell(row=idx, column=7, value=det.venta.metodo_pago)
+
+        self._auto_adjust_columns(ws2)
+
+        # Preparar respuesta con nombre dinámico según rol/turno/fecha (zona America/Lima)
+        f = io.BytesIO()
+        wb.save(f)
+        f.seek(0)
+
+        # Determinar rol, usuario y turno de la caja
+        trabajador = getattr(caja, 'trabajador', None)
+        rol = _slugify_filename_part(getattr(trabajador, 'rol', None) or 'usuario')
+        nombres = ' '.join(filter(None, [getattr(trabajador, 'nombre', ''), getattr(trabajador, 'apellido', '')])) or str(trabajador or '')
+        usuario = _slugify_filename_part(nombres)
+        turno = _slugify_filename_part(getattr(caja, 'turno', '') or '')
+
+        fecha_ap = getattr(caja, 'fecha_apertura', None)
+        try:
+            if hasattr(fecha_ap, 'strftime'):
+                fecha_str = fecha_ap.strftime('%Y-%m-%d')
+            else:
+                fecha_str = ''
+        except Exception:
+            fecha_str = ''
+
+        filename = f"reporte_{rol}_{usuario}_{turno}_{fecha_str}.xlsx" if fecha_str else f"reporte_{rol}_{usuario}_{turno}_{caja.id}.xlsx"
+        response = HttpResponse(f.getvalue(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Access-Control-Expose-Headers'] = 'Content-Disposition'
+        return response
+
+
+class ReportesVentasExcelView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _auto_adjust_columns(self, ws):
+        for column_cells in ws.columns:
+            length = max(len(str(cell.value or "")) for cell in column_cells)
+            col_letter = get_column_letter(column_cells[0].column)
+            ws.column_dimensions[col_letter].width = min(50, length + 4)
+
+    def _parse_date(self, value):
+        try:
+            return date.fromisoformat(value)
+        except Exception:
+            return None
+
+    def _build_date_range(self, request):
+        periodo = request.query_params.get('periodo', '').strip().lower()
+        fecha_inicio = request.query_params.get('fecha_inicio')
+        fecha_fin = request.query_params.get('fecha_fin')
+        hoy = timezone.localdate()
+
+        if periodo:
+            if periodo == 'hoy':
+                return hoy, hoy
+            if periodo == 'ayer':
+                ayer = hoy - timezone.timedelta(days=1)
+                return ayer, ayer
+            if periodo == 'semana':
+                inicio = hoy - timezone.timedelta(days=hoy.weekday())
+                return inicio, hoy
+            if periodo == 'quincena':
+                inicio = hoy - timezone.timedelta(days=14)
+                return inicio, hoy
+            if periodo == 'mes':
+                inicio = hoy.replace(day=1)
+                return inicio, hoy
+
+        if fecha_inicio:
+            fecha_inicio_parsed = self._parse_date(fecha_inicio)
+            if not fecha_inicio_parsed:
+                return None, None
+        else:
+            fecha_inicio_parsed = None
+
+        if fecha_fin:
+            fecha_fin_parsed = self._parse_date(fecha_fin)
+            if not fecha_fin_parsed:
+                return None, None
+        else:
+            fecha_fin_parsed = fecha_inicio_parsed
+
+        return fecha_inicio_parsed, fecha_fin_parsed
+
+    def _build_filename(self, request):
+        trabajador_id = request.query_params.get('trabajador_id')
+        trabajador = None
+        if trabajador_id:
+            try:
+                trabajador_id_int = int(trabajador_id)
+                User = get_user_model()
+                trabajador = User.objects.filter(pk=trabajador_id_int).first()
+            except (ValueError, TypeError):
+                trabajador = None
+
+        if trabajador is not None:
+            nombre = ' '.join(
+                filter(
+                    None,
+                    [
+                        getattr(trabajador, 'nombre', None),
+                        getattr(trabajador, 'first_name', None),
+                        getattr(trabajador, 'apellido', None),
+                        getattr(trabajador, 'last_name', None),
+                        getattr(trabajador, 'username', None),
+                    ],
+                ),
+            ).strip()
+        else:
+            nombre = 'todos'
+
+        nombre_trabajador = _slugify_filename_part(nombre) or 'todos'
+        turno_raw = request.query_params.get('turno')
+        turno = _slugify_filename_part(turno_raw) if turno_raw else 'general'
+        if not turno:
+            turno = 'general'
+
+        periodo = request.query_params.get('periodo', '').strip().lower()
+        fecha_inicio = request.query_params.get('fecha_inicio', '').strip()
+        fecha_fin = request.query_params.get('fecha_fin', '').strip()
+
+        if periodo and periodo != 'personalizado':
+            fecha_txt = periodo
+        elif periodo == 'personalizado':
+            if fecha_inicio and fecha_fin:
+                fecha_txt = fecha_inicio if fecha_inicio == fecha_fin else f"{fecha_inicio}_a_{fecha_fin}"
+            elif fecha_inicio:
+                fecha_txt = fecha_inicio
+            elif fecha_fin:
+                fecha_txt = fecha_fin
+            else:
+                fecha_txt = 'personalizado'
+        elif fecha_inicio and fecha_fin:
+            fecha_txt = fecha_inicio if fecha_inicio == fecha_fin else f"{fecha_inicio}_a_{fecha_fin}"
+        elif fecha_inicio:
+            fecha_txt = fecha_inicio
+        elif fecha_fin:
+            fecha_txt = fecha_fin
+        else:
+            fecha_txt = 'hoy'
+
+        fecha_txt = _slugify_filename_part(fecha_txt) or 'hoy'
+        return f"reporte_trabajador_{nombre_trabajador}_{turno}_{fecha_txt}.xlsx"
+
+    def get(self, request):
+        try:
+            trabajador_id = request.query_params.get('trabajador_id')
+            turno = request.query_params.get('turno')
+            fecha_inicio, fecha_fin = self._build_date_range(request)
+
+            queryset = MovimientoCaja.objects.select_related('trabajador')
+            if trabajador_id:
+                try:
+                    trabajador_id_int = int(trabajador_id)
+                    queryset = queryset.filter(trabajador_id=trabajador_id_int)
+                except (ValueError, TypeError):
+                    queryset = queryset.none()
+            if turno:
+                queryset = queryset.filter(turno=turno)
+            if fecha_inicio and fecha_fin:
+                start_dt = timezone.make_aware(timezone.datetime.combine(fecha_inicio, timezone.datetime.min.time()))
+                end_dt = timezone.make_aware(timezone.datetime.combine(fecha_fin, timezone.datetime.max.time()))
+                queryset = queryset.filter(fecha_hora__gte=start_dt, fecha_hora__lte=end_dt)
+
+            movimientos = queryset.order_by('-fecha_hora')
+
+            wb = Workbook()
+            ws = wb.active
+            ws.title = 'Reporte Trabajador'
+
+            headers = ['Fecha / Hora', 'Trabajador', 'Turno', 'Módulo', 'Tipo', 'Pago', 'Monto', 'Referencia', 'Descripción']
+            for col_idx, h in enumerate(headers, start=1):
+                cell = ws.cell(row=1, column=col_idx, value=h)
+                cell.font = Font(bold=True)
+
+            for idx, mov in enumerate(movimientos, start=2):
+                ws.cell(row=idx, column=1, value=mov.fecha_hora.strftime('%Y-%m-%d %H:%M:%S'))
+                ws.cell(row=idx, column=2, value=str(mov.trabajador))
+                ws.cell(row=idx, column=3, value=mov.turno)
+                ws.cell(row=idx, column=4, value=mov.modulo)
+                ws.cell(row=idx, column=5, value=mov.tipo)
+                ws.cell(row=idx, column=6, value=mov.tipo_caja)
+                ws.cell(row=idx, column=7, value=float(mov.monto))
+                ws.cell(row=idx, column=8, value=mov.referencia)
+                ws.cell(row=idx, column=9, value=mov.descripcion)
+
+            # Totales
+            total = movimientos.filter(tipo=MovimientoCaja.Tipo.INGRESO).aggregate(total=Sum('monto')).get('total') or 0
+            total_row = movimientos.count() + 3
+            ws.cell(row=total_row, column=8, value='Total').font = Font(bold=True)
+            ws.cell(row=total_row, column=9, value=float(total)).font = Font(bold=True)
+
+            self._auto_adjust_columns(ws)
+
+            f = io.BytesIO()
+            wb.save(f)
+            f.seek(0)
+            filename = self._build_filename(request)
+            response = HttpResponse(f.getvalue(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            response['Access-Control-Expose-Headers'] = 'Content-Disposition'
+            return response
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ════════════════════════════════════════

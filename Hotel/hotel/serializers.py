@@ -45,6 +45,7 @@ class HuespedSerializer(BaseSerializer):
 
 class CheckInSerializer(BaseSerializer):
     huesped = HuespedSerializer(read_only=True)
+    reserva = serializers.PrimaryKeyRelatedField(read_only=True)
     monto_habitacion = serializers.SerializerMethodField()
     monto_adicionales = serializers.SerializerMethodField()
     total_pagar = serializers.SerializerMethodField()
@@ -123,9 +124,66 @@ class CargoAdicionalSerializer(BaseSerializer):
 
 
 class ReservaSerializer(BaseSerializer):
+    # Aceptamos un objeto libre desde el frontend y lo procesamos en create()
+    huesped = serializers.DictField(write_only=True, required=False)
+    # Representación de salida del huésped (anidada)
+    huesped_obj = HuespedSerializer(source='huesped', read_only=True)
+    # No exigir trabajador en el payload; se inyecta desde la vista con request.user
+    trabajador = serializers.PrimaryKeyRelatedField(read_only=True)
+    habitacion_preferida = serializers.PrimaryKeyRelatedField(queryset=Habitacion.objects.all())
+
     class Meta:
         model = Reserva
         fields = '__all__'
+
+    def create(self, validated_data):
+        # Manejar creación o asociación de huesped anidado
+        huesped_data = validated_data.pop('huesped', None)
+        if huesped_data:
+            # Normalizar distintos nombres de campos que puede enviar el frontend
+            dni = (
+                huesped_data.get('dni_pasaporte') or huesped_data.get('dni')
+                or huesped_data.get('dni_documento') or huesped_data.get('numero_documento')
+            )
+
+            # Buscar por dni existente
+            huesped = None
+            if dni:
+                huesped = Huesped.objects.filter(dni_pasaporte=str(dni)).first()
+
+            if not huesped:
+                # Soportar nombre completo como una sola cadena
+                nombre = huesped_data.get('nombre') or ''
+                apellido = huesped_data.get('apellido') or ''
+                nombre_completo = huesped_data.get('nombre_completo') or huesped_data.get('nombreCompleto')
+                if nombre_completo and not (nombre or apellido):
+                    parts = nombre_completo.strip().split(None, 1)
+                    nombre = parts[0]
+                    apellido = parts[1] if len(parts) > 1 else ''
+
+                huesped = Huesped.objects.create(
+                    nombre=nombre,
+                    apellido=apellido,
+                    dni_pasaporte=str(dni or huesped_data.get('dni_pasaporte') or ''),
+                    telefono=huesped_data.get('telefono') or huesped_data.get('telefono_celular') or '',
+                    ciudad_origen=huesped_data.get('ciudad_origen', ''),
+                    nacionalidad=huesped_data.get('nacionalidad', Huesped.Nacionalidad.PERU),
+                    estado_civil=huesped_data.get('estado_civil', Huesped.EstadoCivil.SOLTERO),
+                    tipo_visita=huesped_data.get('tipo_visita', Huesped.TipoVisita.INDEPENDIENTE),
+                )
+
+            validated_data['huesped'] = huesped
+
+        # Crear reserva (trabajador puede inyectarse desde la vista)
+        reserva = super().create(validated_data)
+        return reserva
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Mostrar el huésped anidado bajo la clave 'huesped' para compatibilidad con frontend
+        if 'huesped_obj' in data:
+            data['huesped'] = data.pop('huesped_obj')
+        return data
 
 
 class HabitacionEstadoSerializer(serializers.Serializer):
@@ -137,6 +195,7 @@ class CheckInCreateSerializer(serializers.Serializer):
     habitacion_id = serializers.IntegerField()
     huesped_id = serializers.IntegerField(required=False, allow_null=True)
     huesped = serializers.DictField(required=False)
+    reserva_id = serializers.IntegerField(required=False, allow_null=True)
     turno_ingreso = serializers.ChoiceField(choices=CheckIn.TurnoIngreso.choices)
     tipo_pago = serializers.ChoiceField(choices=CheckIn.TipoPago.choices)
     monto_pagado = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, default=0)

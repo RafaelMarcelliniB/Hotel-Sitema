@@ -23,6 +23,8 @@ export default function ModalIngresoCochera({ espacio, onClose }) {
       tipo_vehiculo: espacio?.tipo || 'AUTO',
       tipo_cliente: 'PUBLICO',
       tarifa_tipo: 'POR_HORA',
+      monto: '',
+      detalle_tiempo: '',
       checkin_vinculado_id: '',
       marca: '',
       color: '',
@@ -84,6 +86,7 @@ export default function ModalIngresoCochera({ espacio, onClose }) {
     setSubmitting(true)
     
     try {
+      const monto = watchTipoCliente === 'HUESPED' ? 0.00 : parseFloat(data.monto || 0)
       const payload = {
         espacio_id: espacio.id,
         placa: data.placa.toUpperCase().trim(),
@@ -94,7 +97,10 @@ export default function ModalIngresoCochera({ espacio, onClose }) {
         dni_conductor: data.dni_conductor.trim() || '00000000',
         tipo_cliente: data.tipo_cliente,
         tarifa_tipo: data.tarifa_tipo,
-        checkin_vinculado_id: data.checkin_vinculado_id ? parseInt(data.checkin_vinculado_id) : null
+        monto,
+        detalle_tiempo: data.detalle_tiempo?.trim() || '',
+        es_huesped: watchTipoCliente === 'HUESPED',
+        checkin_vinculado_id: data.checkin_vinculado_id ? parseInt(data.checkin_vinculado_id, 10) : null,
       }
 
       await registrarIngreso(payload)
@@ -214,16 +220,41 @@ export default function ModalIngresoCochera({ espacio, onClose }) {
           </div>
         </div>
 
-        {/* TARIFA */}
-        <div>
-          <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Esquema de Tarifa</label>
-          <select {...register('tarifa_tipo')} className={inputStyle}>
-            <option value="POR_HORA">Por Hora Regular (S/ 5.00)</option>
-            <option value="FRACCION">Por Fracción</option>
-            <option value="DIA_COMPLETO">Día Completo (S/ 25.00)</option>
-            <option value="NOCTURNA">Tarifa Nocturna (S/ 15.00)</option>
-          </select>
-        </div>
+        {/* TIPOS DE COBRO */}
+        {watchTipoCliente === 'HUESPED' ? (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-800">
+            <p className="font-semibold">Servicio de cortesía para huésped</p>
+            <p className="text-sm">S/ 0.00</p>
+          </div>
+        ) : (
+          <>
+            <div>
+              <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Monto Total a Cobrar (S/)</label>
+              <input
+                type="number"
+                step="0.01"
+                inputMode="decimal"
+                placeholder="5.00"
+                className={inputStyle}
+                {...register('monto', { 
+                  required: watchTipoCliente === 'PUBLICO', 
+                  min: { value: 0.01, message: 'Ingrese un monto válido mayor a 0.' }
+                })}
+              />
+              {errors.monto && <p className="text-xs text-red-500 mt-1">{errors.monto.message || 'Ingrese el monto a cobrar.'}</p>}
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Tiempo / Detalle de Cobro</label>
+              <input
+                type="text"
+                placeholder="3 horas, Noche completa"
+                className={inputStyle}
+                {...register('detalle_tiempo')}
+              />
+            </div>
+          </>
+        )}
 
         {/* BOTONES DE ACCIÓN */}
         <div className="flex gap-2 justify-end pt-4 border-t border-slate-100">

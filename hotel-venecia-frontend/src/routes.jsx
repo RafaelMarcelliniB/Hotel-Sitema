@@ -6,6 +6,7 @@ import Caja from './pages/Caja'
 import Cochera from './pages/Cochera'
 import Dashboard from './pages/Dashboard'
 import Hotel from './pages/Hotel'
+import Reservas from './pages/Reservas'
 import Login from './pages/Login'
 import Market from './pages/Market'
 import NotFound from './pages/NotFound'
@@ -26,6 +27,7 @@ export const router = createBrowserRouter([
     ),
     children: [
       { index: true, element: <Dashboard /> },
+      { path: 'reservas', element: <ProtectedRoute allowedRoles={["admin","recepcionista"]}><Reservas /></ProtectedRoute> },
       { 
         path: 'hotel', 
         element: <ProtectedRoute allowedRoles={['admin', 'recepcionista']}><Hotel /></ProtectedRoute> 

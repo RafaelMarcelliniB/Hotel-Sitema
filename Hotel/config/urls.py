@@ -18,6 +18,7 @@ from django.contrib import admin
 from django.urls import include, path
 
 from config.api_views import DashboardView
+from caja.views import ReportesVentasExcelView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -27,5 +28,6 @@ urlpatterns = [
     path('api/market/', include('market.urls')),
     path('api/cochera/', include('cochera.urls')),
     path('api/caja/', include('caja.urls')),
+    path('api/reportes/ventas-excel/', ReportesVentasExcelView.as_view(), name='reportes-ventas-excel'),
     path('api/recados/', include('recados.urls')),
 ]

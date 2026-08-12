@@ -55,13 +55,30 @@ class CheckInService(BaseService):
 
         if huesped_data:
             dni = huesped_data.get('dni_pasaporte') or huesped_data.get('dni')
-            huesped = self.huesped_repo.model.objects.filter(dni_pasaporte=dni).first() if dni else None
-            if huesped:
-                return huesped
+            if dni:
+                # Usar get_or_create para evitar IntegrityError en concurrencia
+                defaults = {
+                    'nombre': huesped_data.get('nombre', ''),
+                    'apellido': huesped_data.get('apellido', ''),
+                    'telefono': huesped_data.get('telefono', '') or huesped_data.get('telefono_celular', ''),
+                    'ciudad_origen': huesped_data.get('ciudad_origen', ''),
+                    'nacionalidad': huesped_data.get('nacionalidad', HuespedRepository.model.Nacionalidad.PERU),
+                    'estado_civil': huesped_data.get('estado_civil', HuespedRepository.model.EstadoCivil.SOLTERO),
+                    'tipo_visita': huesped_data.get('tipo_visita', HuespedRepository.model.TipoVisita.INDEPENDIENTE),
+                }
+                try:
+                    huesped, created = self.huesped_repo.model.objects.get_or_create(dni_pasaporte=str(dni), defaults=defaults)
+                    return huesped
+                except Exception:
+                    # Fallback: intentar buscar por dni (si get_or_create falló por race/integrity)
+                    huesped = self.huesped_repo.model.objects.filter(dni_pasaporte=str(dni)).first()
+                    if huesped:
+                        return huesped
+            # Si no hay dni o no se encontró, crear sin dni (posible cuando frontend envía solo nombre)
             return self.huesped_repo.create(
                 nombre=huesped_data.get('nombre', ''),
                 apellido=huesped_data.get('apellido', ''),
-                dni_pasaporte=dni,
+                dni_pasaporte=str(dni or huesped_data.get('dni_pasaporte') or ''),
                 telefono=huesped_data.get('telefono', ''),
                 ciudad_origen=huesped_data.get('ciudad_origen', ''),
                 nacionalidad=huesped_data.get('nacionalidad', HuespedRepository.model.Nacionalidad.PERU),
@@ -75,9 +92,9 @@ class CheckInService(BaseService):
     def iniciar_alquiler(self, data, trabajador):
         data = dict(data)
         habitacion = self.habitacion_repo.get_by_id(data.get('habitacion_id') or data.get('habitacion'))
-        
-        if habitacion.estado_ocupacion != Habitacion.EstadoOcupacion.DISPONIBLE:
-            raise ValueError("La habitación no está disponible.")
+        # PERMITIR TANTO DISPONIBLE COMO RESERVADO
+        if habitacion.estado_ocupacion not in (Habitacion.EstadoOcupacion.DISPONIBLE, Habitacion.EstadoOcupacion.RESERVADO):
+            raise ValueError("La habitación no está disponible para check-in.")
 
         huesped = self._obtener_huesped(data)
         turno_ingreso = data.get('turno_ingreso')
@@ -86,6 +103,14 @@ class CheckInService(BaseService):
         monto_deuda = max(tarifa - monto_pagado, Decimal('0'))
 
         # Crea el Check-In
+        # Asociar reserva al CheckIn si se proporcionó reserva_id
+        reserva_obj = None
+        if data.get('reserva_id'):
+            try:
+                reserva_obj = ReservaRepository().get_by_id(data.get('reserva_id'))
+            except Exception:
+                reserva_obj = None
+
         checkin = self.repository.create(
             habitacion=habitacion,
             huesped=huesped,
@@ -99,10 +124,39 @@ class CheckInService(BaseService):
             monto_pagado=monto_pagado,
             monto_deuda=monto_deuda,
             es_pareja=data.get('es_pareja', False),
+            reserva=reserva_obj
         )
 
-        # Actualiza estado de habitación 
-        self.habitacion_repo.update(habitacion.id, estado_ocupacion=Habitacion.EstadoOcupacion.OCUPADO)
+        # Actualiza estado de habitación: marcar como OCUPADO y guardar la instancia
+        try:
+            habitacion.estado_ocupacion = Habitacion.EstadoOcupacion.OCUPADO
+            habitacion.save(update_fields=['estado_ocupacion'])
+        except Exception:
+            # Fallback seguro usando el repositorio
+            self.habitacion_repo.update(habitacion.id, estado_ocupacion=Habitacion.EstadoOcupacion.OCUPADO)
+
+        # Si el checkin proviene de una reserva vinculada (payload) o existe una reserva activa
+        # para la habitación, actualizar su estado a COMPLETADA (no bloquear el check-in si falla)
+        try:
+            reserva_repo = ReservaRepository()
+            reserva_to_update = None
+
+            # Preferir reserva enviada en payload
+            if data.get('reserva_id'):
+                reserva_to_update = reserva_obj or reserva_repo.get_by_id(data.get('reserva_id'))
+            else:
+                # Buscar una reserva activa/pending vinculada a la habitación
+                reserva_to_update = reserva_repo.model.objects.filter(
+                    habitacion_preferida=habitacion,
+                    estado__in=[reserva_repo.model.Estado.PENDIENTE, reserva_repo.model.Estado.CONFIRMADA_CHECKIN]
+                ).first()
+
+            if reserva_to_update:
+                reserva_to_update.estado = reserva_repo.model.Estado.COMPLETADA
+                reserva_to_update.save(update_fields=['estado'])
+        except Exception:
+            # No bloquear el flujo por errores en actualización de reservas
+            pass
 
         # =====================================================================
         # INYECCIÓN AUTOMÁTICA EN CAJA (SOLUCIÓN AL BALANCE DEL DASHBOARD)
