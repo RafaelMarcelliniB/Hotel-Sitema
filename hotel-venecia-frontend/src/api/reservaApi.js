@@ -28,6 +28,16 @@ export async function procesarCheckinReserva(id, payload) {
   return data
 }
 
+export async function procesarDevolucionReserva(id) {
+  const { data } = await api.post(`/hotel/reservas/${id}/devolucion/`)
+  return data
+}
+
+export async function retenerGarantiaReserva(id) {
+  const { data } = await api.post(`/hotel/reservas/${id}/penalidad/`)
+  return data
+}
+
 export async function getReservasPorHabitacion(habitacionId) {
   // Aceptamos que nos pasen un objeto habitación o directamente un id.
   // Guard clause estricta: evitar llamadas con `undefined` como string o valores falsy
@@ -41,7 +51,7 @@ export async function getReservasPorHabitacion(habitacionId) {
   // Usar exclusivamente el endpoint de lista de reservas con filtro por habitación
   try {
     // Nota: algunos backends aceptan `habitacion` o `habitacion_id` como parámetro.
-    const { data } = await api.get('/hotel/reservas/', { params: { habitacion: id, estado: 'PENDIENTE' } })
+    const { data } = await api.get('/hotel/reservas/', { params: { habitacion_id: id, estado: 'PENDIENTE' } })
     const arr = Array.isArray(data) ? data : (data?.data || [])
     return arr.filter(r => !r.estado || r.estado === 'PENDIENTE')
   } catch (err) {

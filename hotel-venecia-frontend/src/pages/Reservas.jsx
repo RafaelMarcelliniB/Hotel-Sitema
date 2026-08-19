@@ -23,6 +23,8 @@ export default function Reservas() {
   const [vencidasData, setVencidasData] = useState([])
   const [vencidasLoading, setVencidasLoading] = useState(false)
   const [vencidasError, setVencidasError] = useState(null)
+  const [pisoFiltro, setPisoFiltro] = useState('TODOS')
+  const [estadoFiltro, setEstadoFiltro] = useState('TODOS')
 
   const handleClick = (hab) => {
     // Si la habitación está RESERVADO abrimos el modal para procesar la reserva activa
@@ -114,6 +116,13 @@ export default function Reservas() {
     return { enToleranciaCount: enTol, porVencerCount: porVen }
   }, [reservasByHabitacion])
 
+  const pisos = useMemo(() => [...new Set((habitaciones || []).map(h => h.piso))].sort((a, b) => a - b), [habitaciones])
+  const habitacionesFiltradas = useMemo(() => (habitaciones || []).filter((habitacion) => {
+    const coincidePiso = pisoFiltro === 'TODOS' || String(habitacion.piso) === pisoFiltro
+    const coincideEstado = estadoFiltro === 'TODOS' || habitacion.estado_ocupacion === estadoFiltro
+    return coincidePiso && coincideEstado
+  }), [habitaciones, pisoFiltro, estadoFiltro])
+
   if (isLoading) return (<div className="flex h-screen items-center justify-center"><Spinner /></div>)
 
   return (
@@ -181,8 +190,27 @@ export default function Reservas() {
         </div>
       </div>
 
+      <div className="mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-white p-4">
+        <div>
+          <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-500">Piso</label>
+          <select value={pisoFiltro} onChange={e => setPisoFiltro(e.target.value)} className="rounded border border-slate-300 px-3 py-2 text-sm">
+            <option value="TODOS">Todos los pisos</option>
+            {pisos.map(piso => <option key={piso} value={piso}>Piso {piso}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-500">Estado de reserva</label>
+          <select value={estadoFiltro} onChange={e => setEstadoFiltro(e.target.value)} className="rounded border border-slate-300 px-3 py-2 text-sm">
+            <option value="TODOS">Todos los estados</option>
+            <option value="DISPONIBLE">Disponible</option>
+            <option value="RESERVADO">Reservada</option>
+          </select>
+        </div>
+        <span className="pb-2 text-sm text-slate-500">{habitacionesFiltradas.length} habitaciones visibles</span>
+      </div>
+
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
-        {(habitaciones || []).map(hab => (
+        {habitacionesFiltradas.map(hab => (
           <HabitacionCard key={hab.id} habitacion={hab} onClick={handleClick} />
         ))}
       </div>
@@ -210,7 +238,18 @@ export default function Reservas() {
         />
       )}
 
-      <ModalVencidas isOpen={vencidasOpen} onClose={() => setVencidasOpen(false)} reservas={vencidasData || []} loading={vencidasLoading} error={vencidasError} />
+      <ModalVencidas
+        isOpen={vencidasOpen}
+        onClose={() => setVencidasOpen(false)}
+        reservas={vencidasData || []}
+        loading={vencidasLoading}
+        error={vencidasError}
+        onProcessed={async () => {
+          const data = await refetchVencidas()
+          setVencidasData(data?.data || data || [])
+          refetch()
+        }}
+      />
     </div>
   )
 }

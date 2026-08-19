@@ -281,7 +281,9 @@ export default function ModalCheckIn({ habitacion, onClose, onSuccess, initialDa
                 <label className="block text-xs font-medium text-slate-600 mb-1">Método Pago</label>
                 <Select value={tipoPago} onChange={(e) => setTipoPago(e.target.value)}>
                   <option value="EFECTIVO">Efectivo</option>
-                  <option value="YAPE">Yape / Plin</option>
+                  <option value="YAPE">Yape</option>
+                  <option value="PLIN">Plin</option>
+                  <option value="TRANSFERENCIA">Transferencia</option>
                   <option value="TARJETA">Tarjeta</option>
                 </Select>
               </div>

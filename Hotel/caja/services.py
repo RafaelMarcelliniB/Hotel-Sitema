@@ -1,6 +1,7 @@
 from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
+from decimal import Decimal
 
 from core.base_services import BaseService
 from caja.models import Caja, MovimientoCaja
@@ -15,12 +16,20 @@ class CajaService(BaseService):
         turno = datos['turno']
         if self.repository.model.objects.filter(estado=Caja.Estado.ABIERTA, turno=turno, trabajador=trabajador).exists():
             raise ValueError('Ya existe una caja abierta para este trabajador en este turno.')
+        monto_inicial = datos.get('monto_inicial')
+        if monto_inicial is None:
+            caja_anterior = self.repository.model.objects.filter(
+                trabajador=trabajador,
+                fecha_apertura=timezone.localdate(),
+                estado=Caja.Estado.CERRADA,
+            ).order_by('-fecha_cierre', '-hora_cierre').first()
+            monto_inicial = caja_anterior.monto_final if caja_anterior else 0
         return self.repository.create(
             trabajador=trabajador,
             turno=turno,
             fecha_apertura=timezone.localdate(),
             hora_apertura=timezone.localtime().time(),
-            monto_inicial=datos['monto_inicial'],
+            monto_inicial=monto_inicial,
             estado=Caja.Estado.ABIERTA,
         )
 
@@ -58,15 +67,27 @@ class CajaService(BaseService):
             tipo_caja=MovimientoCaja.TipoCaja.EFECTIVO, 
             tipo=MovimientoCaja.Tipo.INGRESO
         ).aggregate(total=Sum('monto')).get('total') or 0
+        egresos_efectivo = movimientos.filter(
+            tipo_caja=MovimientoCaja.TipoCaja.EFECTIVO,
+            tipo=MovimientoCaja.Tipo.EGRESO,
+        ).aggregate(total=Sum('monto')).get('total') or 0
 
         total_yape = movimientos.filter(
             tipo_caja=MovimientoCaja.TipoCaja.YAPE, 
             tipo=MovimientoCaja.Tipo.INGRESO
         ).aggregate(total=Sum('monto')).get('total') or 0
+        egresos_yape = movimientos.filter(
+            tipo_caja=MovimientoCaja.TipoCaja.YAPE,
+            tipo=MovimientoCaja.Tipo.EGRESO,
+        ).aggregate(total=Sum('monto')).get('total') or 0
 
         total_tarjeta = movimientos.filter(
             tipo_caja=MovimientoCaja.TipoCaja.TARJETA, 
             tipo=MovimientoCaja.Tipo.INGRESO
+        ).aggregate(total=Sum('monto')).get('total') or 0
+        egresos_tarjeta = movimientos.filter(
+            tipo_caja=MovimientoCaja.TipoCaja.TARJETA,
+            tipo=MovimientoCaja.Tipo.EGRESO,
         ).aggregate(total=Sum('monto')).get('total') or 0
         
         total_ingresos = movimientos.filter(tipo=MovimientoCaja.Tipo.INGRESO).aggregate(total=Sum('monto')).get('total') or 0
@@ -74,13 +95,16 @@ class CajaService(BaseService):
         deudas = movimientos.filter(tipo=MovimientoCaja.Tipo.DEUDA, pagada=False)
         
         # OPERACIÓN MATEMÁTICA PURA: Monto Inicial + lo recaudado en los diferentes métodos - salidas efectivas
-        total_general = float(caja.monto_inicial) + float(total_efectivo) + float(total_yape) + float(total_tarjeta) - float(total_egresos)
+        total_general = float(caja.monto_inicial) + float(total_ingresos) - float(total_egresos)
         
         return {
             'monto_inicial': caja.monto_inicial,
             'total_efectivo': total_efectivo,
+            'egresos_efectivo': egresos_efectivo,
             'total_yape': total_yape,
+            'egresos_yape': egresos_yape,
             'total_tarjeta': total_tarjeta,
+            'egresos_tarjeta': egresos_tarjeta,
             'total_ingresos': total_ingresos,
             'total_egresos': total_egresos,
             'total_general': total_general,  
@@ -127,6 +151,47 @@ class MovimientoCajaService(BaseService):
     def pagar_deuda(self, movimiento):
         movimiento.pagada = True
         movimiento.save(update_fields=['pagada'])
+        return movimiento
+
+    @transaction.atomic
+    def registrar_egreso(self, datos, caja, trabajador):
+        return self.agregar_movimiento({
+            'tipo': MovimientoCaja.Tipo.EGRESO,
+            'tipo_caja': datos['tipo_caja'],
+            'modulo': MovimientoCaja.Modulo.OTRO,
+            'referencia': datos['categoria'],
+            'monto': datos['monto'],
+            'descripcion': datos['descripcion'],
+        }, caja)
+
+    @transaction.atomic
+    def ajustar_tarifa(self, datos, caja, trabajador):
+        from hotel.models import CheckIn
+        from users.models import AuditLog
+
+        checkin = CheckIn.objects.select_for_update().select_related('habitacion', 'huesped').get(pk=datos['checkin_id'])
+        monto = Decimal(str(datos['monto']))
+        es_reembolso = datos['accion'] == 'REEMBOLSO'
+        if es_reembolso:
+            checkin.monto_pagado = max(checkin.monto_pagado - monto, Decimal('0'))
+        else:
+            checkin.monto_deuda += monto
+        checkin.save(update_fields=['monto_pagado', 'monto_deuda'])
+
+        movimiento = self.agregar_movimiento({
+            'tipo': MovimientoCaja.Tipo.EGRESO if es_reembolso else MovimientoCaja.Tipo.INGRESO,
+            'tipo_caja': datos['tipo_caja'],
+            'modulo': MovimientoCaja.Modulo.HOTEL,
+            'referencia': f'REEMBOLSO / CORRECCIÓN DE TARIFA - CheckIn #{checkin.id}',
+            'monto': monto,
+            'descripcion': datos['motivo'],
+        }, caja)
+        AuditLog.objects.create(
+            trabajador=trabajador,
+            accion='ajuste_tarifa',
+            modulo='caja',
+            detalle=f'{movimiento.referencia}; usuario={trabajador}; monto={monto}; motivo={datos["motivo"]}',
+        )
         return movimiento
 
 # ════════════════════════════════════════

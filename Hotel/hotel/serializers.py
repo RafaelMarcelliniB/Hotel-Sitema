@@ -86,7 +86,11 @@ class CheckInSerializer(BaseSerializer):
             sub_market = Decimal(str(sub_market)) if sub_market is not None else Decimal('0.00')
             
             # 3. Cochera (Controlamos estrictamente si no hay registros vinculados aún)
-            vehiculos_query = RegistroVehiculo.objects.filter(checkin_vinculado=obj)
+            vehiculos_query = RegistroVehiculo.objects.filter(
+                checkin_vinculado=obj,
+                fecha_salida__isnull=True,
+                espacio__estado='OCUPADO',
+            )
             if vehiculos_query.exists():
                 sub_cochera = vehiculos_query.aggregate(total=Sum('monto_total'))['total']
                 sub_cochera = Decimal(str(sub_cochera)) if sub_cochera is not None else Decimal('0.00')

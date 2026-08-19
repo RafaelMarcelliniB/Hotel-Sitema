@@ -38,6 +38,8 @@ class MovimientoCaja(BaseModel):
 	class TipoCaja(models.TextChoices):
 		EFECTIVO = 'EFECTIVO', 'Efectivo'
 		YAPE = 'YAPE', 'Yape'
+		PLIN = 'PLIN', 'Plin'
+		TRANSFERENCIA = 'TRANSFERENCIA', 'Transferencia'
 		TARJETA = 'TARJETA', 'Tarjeta'
 
 	class Modulo(models.TextChoices):

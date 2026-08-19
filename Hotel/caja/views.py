@@ -20,6 +20,8 @@ from caja.serializers import (
     CajaSerializer,
     MovimientoCajaInputSerializer,
     MovimientoCajaSerializer,
+    EgresoInputSerializer,
+    AjusteTarifaInputSerializer,
 )
 from caja.services import CajaService, MovimientoCajaService
 
@@ -370,6 +372,50 @@ class MovimientoCajaPagarDeudaView(APIView):
         return Response(MovimientoCajaSerializer(movimiento).data)
 
 
+class CajaAperturaSugeridaView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        caja_anterior = Caja.objects.filter(
+            trabajador=request.user,
+            fecha_apertura=timezone.localdate(),
+            estado=Caja.Estado.CERRADA,
+        ).order_by('-fecha_cierre', '-hora_cierre').first()
+        return Response({
+            'monto_sugerido': caja_anterior.monto_final if caja_anterior else 0,
+            'caja_anterior_id': caja_anterior.id if caja_anterior else None,
+        })
+
+
+class CajaEgresoView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        caja = _caja_activa(request.user)
+        if not caja:
+            return Response({'detail': 'No existe una caja abierta.'}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = EgresoInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        movimiento = MovimientoCajaService().registrar_egreso(serializer.validated_data, caja, request.user)
+        return Response(MovimientoCajaSerializer(movimiento).data, status=status.HTTP_201_CREATED)
+
+
+class CajaAjusteTarifaView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        caja = _caja_activa(request.user)
+        if not caja:
+            return Response({'detail': 'No existe una caja abierta.'}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = AjusteTarifaInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            movimiento = MovimientoCajaService().ajustar_tarifa(serializer.validated_data, caja, request.user)
+        except Exception as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(MovimientoCajaSerializer(movimiento).data, status=status.HTTP_201_CREATED)
+
+
 class HealthCajaView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -409,7 +455,7 @@ class CajaReporteExcelView(APIView):
         ws = wb.active
         ws.title = 'Movimientos'
 
-        headers = ['Fecha / Hora', 'Módulo', 'Descripción', 'Tipo', 'Trabajador', 'Monto', 'Referencia', 'Detalle']
+        headers = ['Fecha / Hora', 'Módulo', 'Descripción', 'Tipo', 'Método de Pago', 'Trabajador', 'Monto', 'Referencia', 'Detalle']
         for col_idx, h in enumerate(headers, start=1):
             cell = ws.cell(row=1, column=col_idx, value=h)
             cell.font = Font(bold=True)
@@ -437,23 +483,25 @@ class CajaReporteExcelView(APIView):
             detalle = _field(mov, 'detalle', '')
             modulo = _field(mov, 'modulo')
             tipo = _field(mov, 'tipo')
+            tipo_caja = _field(mov, 'tipo_caja')
 
             ws.cell(row=row_idx, column=1, value=fecha_val)
             ws.cell(row=row_idx, column=2, value=modulo)
             ws.cell(row=row_idx, column=3, value=descripcion)
             ws.cell(row=row_idx, column=4, value=tipo)
-            ws.cell(row=row_idx, column=5, value=str(trabajador) if trabajador is not None else '')
+            ws.cell(row=row_idx, column=5, value=tipo_caja)
+            ws.cell(row=row_idx, column=6, value=str(trabajador) if trabajador is not None else '')
             try:
-                ws.cell(row=row_idx, column=6, value=float(monto))
+                ws.cell(row=row_idx, column=7, value=float(monto))
             except Exception:
-                ws.cell(row=row_idx, column=6, value=0)
-            ws.cell(row=row_idx, column=7, value=referencia)
-            ws.cell(row=row_idx, column=8, value=detalle)
+                ws.cell(row=row_idx, column=7, value=0)
+            ws.cell(row=row_idx, column=8, value=referencia)
+            ws.cell(row=row_idx, column=9, value=detalle)
 
         # Totales
         total_row = len(movimientos) + 3
-        ws.cell(row=total_row, column=5, value='Total').font = Font(bold=True)
-        ws.cell(row=total_row, column=6, value=float(resumen.get('total_general', 0))).font = Font(bold=True)
+        ws.cell(row=total_row, column=6, value='Total').font = Font(bold=True)
+        ws.cell(row=total_row, column=7, value=float(resumen.get('total_general', 0))).font = Font(bold=True)
 
         self._auto_adjust_columns(ws)
 
@@ -480,6 +528,16 @@ class CajaReporteExcelView(APIView):
             ws2.cell(row=idx, column=7, value=det.venta.metodo_pago)
 
         self._auto_adjust_columns(ws2)
+
+        ws3 = wb.create_sheet(title='Resumen por pago')
+        ws3.append(['Concepto', 'Efectivo', 'Yape', 'Tarjeta', 'Total'])
+        ws3.append(['Ingresos', float(resumen['total_efectivo']), float(resumen['total_yape']), float(resumen['total_tarjeta']), float(resumen['total_ingresos'])])
+        ws3.append(['Egresos', float(resumen['egresos_efectivo']), float(resumen['egresos_yape']), float(resumen['egresos_tarjeta']), float(resumen['total_egresos'])])
+        ws3.append(['Monto inicial', float(resumen['monto_inicial']), 0, 0, float(resumen['monto_inicial'])])
+        ws3.append(['Total general', '', '', '', float(resumen['total_general'])])
+        for cell in ws3[1]:
+            cell.font = Font(bold=True)
+        self._auto_adjust_columns(ws3)
 
         # Preparar respuesta con nombre dinámico según rol/turno/fecha (zona America/Lima)
         f = io.BytesIO()

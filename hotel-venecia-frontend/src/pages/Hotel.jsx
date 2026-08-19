@@ -8,8 +8,9 @@ import Spinner from '../components/ui/Spinner'
 import api from '../api/axiosConfig' 
 
 export default function Hotel() {
-  const { habitaciones, isLoading, refetch } = useHabitaciones()
+  const { habitaciones, isLoading, refetch, cambiarEstado } = useHabitaciones()
   const [selectedHab, setSelectedHab] = useState(null)
+  const [pisoSeleccionado, setPisoSeleccionado] = useState('TODOS')
   const [showCheckIn, setShowCheckIn] = useState(false)
   const [showCheckOut, setShowCheckOut] = useState(false) 
   const [showProcesarReserva, setShowProcesarReserva] = useState(false)
@@ -34,8 +35,28 @@ export default function Hotel() {
     }
   };
 
+  const handleRequestMaintenance = async (hab) => {
+    const enMantenimiento = hab.estado_ocupacion === 'MANTENIMIENTO';
+    const accion = enMantenimiento ? 'habilitar' : 'enviar a mantenimiento';
+    if (!window.confirm(`¿Confirmas ${accion} la Habitación #${hab.numero}?`)) return;
+
+    try {
+      await cambiarEstado({
+        id: hab.id,
+        estado_ocupacion: enMantenimiento ? 'DISPONIBLE' : 'MANTENIMIENTO',
+        estado_limpieza: hab.estado_limpieza
+      });
+      refetch();
+    } catch (error) {
+      console.error('Error al actualizar el mantenimiento:', error);
+      alert('No se pudo actualizar el estado de mantenimiento.');
+    }
+  };
+
   const handleRoomClick = (hab) => {
     console.log("Datos de habitación seleccionada:", hab);
+
+    if (hab.estado_ocupacion === 'MANTENIMIENTO') return;
 
     // 1. PRIMERA VALIDACIÓN: Si está OCUPADA, se abre el Check-Out obligatoriamente
     if (hab.estado_ocupacion === 'OCUPADO' || hab.estado === 'OCUPADO') {
@@ -104,6 +125,12 @@ export default function Hotel() {
     </div>
   )
 
+  const pisos = [...new Set((habitaciones || []).map((habitacion) => habitacion.piso))]
+    .sort((a, b) => a - b)
+  const habitacionesVisibles = (habitaciones || []).filter(
+    (habitacion) => pisoSeleccionado === 'TODOS' || String(habitacion.piso) === String(pisoSeleccionado)
+  )
+
   return (
     <div className="p-6 bg-slate-50 min-h-screen">
       <div className="mb-6">
@@ -111,15 +138,42 @@ export default function Hotel() {
         <p className="text-sm text-slate-500">Selecciona una habitación disponible para ingreso o una ocupada para salida</p>
       </div>
       
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
-        {habitaciones?.map(hab => (
-          <HabitacionCard 
-            key={hab.id} 
-            habitacion={hab} 
-            onClick={handleRoomClick} 
-          />
+      <div className="mb-6 flex flex-wrap gap-2" role="tablist" aria-label="Filtrar habitaciones por piso">
+        {['TODOS', ...pisos].map((piso) => (
+          <button
+            key={piso}
+            type="button"
+            role="tab"
+            aria-selected={pisoSeleccionado === piso}
+            onClick={() => setPisoSeleccionado(piso)}
+            className={`rounded-lg border px-4 py-2 text-sm font-bold transition-colors ${
+              pisoSeleccionado === piso
+                ? 'border-slate-800 bg-slate-800 text-white'
+                : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'
+            }`}
+          >
+            {piso === 'TODOS' ? 'Todos' : `Piso ${piso}`}
+          </button>
         ))}
       </div>
+
+      {pisos.length > 0 && (pisoSeleccionado === 'TODOS' ? pisos : [pisoSeleccionado]).map((piso) => (
+        <section key={piso} className="mb-8" aria-labelledby={`piso-${piso}`}>
+          <h3 id={`piso-${piso}`} className="mb-3 text-sm font-black uppercase tracking-wider text-slate-500">
+            Piso {piso}
+          </h3>
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+            {habitacionesVisibles.filter((habitacion) => habitacion.piso === piso).map((hab) => (
+              <HabitacionCard
+                key={hab.id}
+                habitacion={hab}
+                onClick={handleRoomClick}
+                onRequestMaintenance={handleRequestMaintenance}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
 
       {/* Modal para Registro (Entrada) */}
       {showCheckIn && selectedHab && (

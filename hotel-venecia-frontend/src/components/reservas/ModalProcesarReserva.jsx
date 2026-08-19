@@ -1,16 +1,17 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { useReservasPorHabitacion } from '../../hooks/useReservas'
 
-export default function ModalProcesarReserva({ habitacion, isOpen, onClose, onSuccess, onOpenCheckIn }) {
+export default function ModalProcesarReserva({ habitacion, isOpen, onClose, onOpenCheckIn }) {
   // Extraer el id de la habitación de forma defensiva: puede venir como objeto o como campos distintos
   const habitacionId = habitacion ? (habitacion.id ?? habitacion.habitacion_id ?? habitacion.numero) : null
-  const { data: reservas = [], isLoading, isError, refetch } = useReservasPorHabitacion(habitacionId)
+  const { data: reservas = [], isLoading, isError } = useReservasPorHabitacion(habitacionId)
   const [processingId, setProcessingId] = useState(null)
 
   if (!isOpen) return null
 
   const handleProcesar = (reserva) => {
     if (!window.confirm(`Abrir formulario de Check-in para ${reserva.huesped?.nombre || 'Huésped'} en Hab ${habitacion.numero}?`)) return
+    setProcessingId(reserva.id)
     // Preparar datos para abrir el modal principal de Check-in (no ejecutar la API aquí)
     const initialPayload = {
       // incluir el id de la reserva para que el modal de CheckIn pueda enviar `reserva_id`
@@ -21,8 +22,9 @@ export default function ModalProcesarReserva({ habitacion, isOpen, onClose, onSu
       cliente_dni: reserva.huesped?.dni_pasaporte || reserva.dni || reserva.documento || '',
       // Mapear el teléfono siguiendo la estructura flexible solicitada
       cliente_telefono: reserva.cliente_telefono || reserva.telefono || reserva.celular || (reserva.cliente && reserva.cliente.celular) || (reserva.cliente && reserva.cliente.telefono) || '',
-      monto_adelanto: reserva.monto_pagado ?? reserva.precio_pagado ?? 20.00,
-      garantia: 20.00,
+      monto_adelanto: reserva.monto_adelanto ?? reserva.monto_garantia ?? reserva.monto_pagado ?? 20.00,
+      garantia: reserva.monto_garantia ?? 20.00,
+      tipo_pago: reserva.tipo_pago_adelanto || 'EFECTIVO',
       habitacion_id: habitacion?.id ?? habitacion?.habitacion_id
     }
 
@@ -33,6 +35,7 @@ export default function ModalProcesarReserva({ habitacion, isOpen, onClose, onSu
 
     // Cerrar este modal
     onClose && onClose()
+    setProcessingId(null)
   }
 
   return (

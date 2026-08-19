@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { useCajas } from '../hooks/useCajas'
 import { downloadCajaReporte } from '../api/reportesApi'
+import api from '../api/axiosConfig'
 import { Modal } from '../components/ui/Modal'
 import Button from '../components/ui/Button'
 import Card from '../components/ui/Card'
 import ModalAperturaCaja from '../components/caja/ModalAperturaCaja'
+import ModalEgresoCaja from '../components/caja/ModalEgresoCaja'
+import ModalAjusteTarifa from '../components/caja/ModalAjusteTarifa'
 
 const getFileNameFromContentDisposition = (contentDisposition) => {
   if (!contentDisposition) return null
@@ -32,6 +35,33 @@ export default function Caja() {
   const { data: resumen, isLoading: loadingResumen, error } = useResumen()
   const [showApertura, setShowApertura] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
+  const [showEgreso, setShowEgreso] = useState(false)
+  const [showAjuste, setShowAjuste] = useState(false)
+  const [movimientoAjuste, setMovimientoAjuste] = useState(null)
+  const [isSaving, setIsSaving] = useState(false)
+
+  const registrarEgreso = async (payload) => {
+    try {
+      setIsSaving(true)
+      await api.post('/caja/egresos/', payload)
+      setShowEgreso(false)
+      window.location.reload()
+    } catch (err) {
+      alert(err.response?.data?.detail || 'No se pudo registrar el egreso.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const ajustarTarifa = async (payload) => {
+    try {
+      await api.post('/caja/ajustes-tarifa/', payload)
+      setShowAjuste(false)
+      window.location.reload()
+    } catch (err) {
+      alert(err.response?.data?.detail || 'No se pudo aplicar el ajuste.')
+    }
+  }
 
   // 1. Estado de carga inicial
   if (loadingHook || loadingResumen) {
@@ -99,6 +129,7 @@ export default function Caja() {
         </div>
         
         <div className="flex items-center gap-3">
+          <Button variant="secondary" onClick={() => setShowEgreso(true)}>Registrar Egreso</Button>
           <Button
             variant="secondary"
             onClick={async () => {
@@ -185,6 +216,7 @@ export default function Caja() {
                 <th className="px-4 py-3">Descripción</th>
                 <th className="px-4 py-3">Tipo</th>
                 <th className="px-4 py-3 text-right">Monto</th>
+                <th className="px-4 py-3 text-right">Acción</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -208,11 +240,18 @@ export default function Caja() {
                     }`}>\
                       {mov.tipo === 'INGRESO' ? '+' : '-'} S/ {Number(mov.monto).toFixed(2)}
                     </td>
+                    <td className="px-4 py-3 text-right">
+                      {mov.modulo === 'HOTEL' && (
+                        <button type="button" className="text-xs font-semibold text-blue-700 hover:underline" onClick={() => { setMovimientoAjuste(mov); setShowAjuste(true) }}>
+                          Ajustar Tarifa / Reembolsar
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan="5" className="px-4 py-10 text-center text-slate-400">
+                  <td colSpan="6" className="px-4 py-10 text-center text-slate-400">
                     No hay movimientos registrados en este turno.
                   </td>
                 </tr>
@@ -221,6 +260,13 @@ export default function Caja() {
           </table>
         </div>
       </div>
+      <ModalEgresoCaja open={showEgreso} onClose={() => setShowEgreso(false)} onSubmit={registrarEgreso} isSaving={isSaving} />
+      <ModalAjusteTarifa
+        open={showAjuste}
+        onClose={() => setShowAjuste(false)}
+        onSubmit={ajustarTarifa}
+        defaultCheckinId={movimientoAjuste?.referencia?.match(/CheckIn #(\d+)/i)?.[1] || ''}
+      />
     </div>
   )
 }

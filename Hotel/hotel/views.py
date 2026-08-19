@@ -87,7 +87,9 @@ def _calcular_resumen_checkin(checkin):
 
     subtotal_cochera = Decimal('0')
     vehiculos = RegistroVehiculo.objects.filter(
-        Q(checkin_vinculado=checkin) | Q(dni_conductor=checkin.huesped.dni_pasaporte)
+        checkin_vinculado=checkin,
+        fecha_salida__isnull=True,
+        espacio__estado='OCUPADO',
     )
 
     # Para huéspedes del hotel, la cochera es cortesía: no se factura.
@@ -138,7 +140,9 @@ def _serializar_detalle_checkin(checkin):
 
     vehiculos = []
     vehiculos_query = RegistroVehiculo.objects.filter(
-        Q(checkin_vinculado=checkin) | Q(dni_conductor=checkin.huesped.dni_pasaporte)
+        checkin_vinculado=checkin,
+        fecha_salida__isnull=True,
+        espacio__estado='OCUPADO',
     )
 
     for v in vehiculos_query:
@@ -301,11 +305,14 @@ class ReservaViewSet(viewsets.ModelViewSet):
         queryset = super().get_queryset()
         fecha = self.request.query_params.get('fecha')
         habitacion_id = self.request.query_params.get('habitacion_id')
+        estado = self.request.query_params.get('estado')
         if habitacion_id:
             try:
                 queryset = queryset.filter(habitacion_preferida_id=int(habitacion_id))
             except Exception:
                 pass
+        if estado:
+            queryset = queryset.filter(estado=estado)
         if fecha == 'hoy':
             fecha = timezone.localdate()
         if fecha:
@@ -340,12 +347,15 @@ class ReservaViewSet(viewsets.ModelViewSet):
             ahora = timezone.now()
             umbral = ahora - timedelta(hours=tolerancia_horas)
 
-            pendientes = Reserva.objects.filter(estado=Reserva.Estado.PENDIENTE, created_at__lte=umbral).select_related('huesped', 'habitacion_preferida')
+            pendientes = Reserva.objects.filter(estado=Reserva.Estado.PENDIENTE, created_at__lte=umbral)
             # Marcamos como vencidas para gestionar reembolso
             pendientes.update(estado=Reserva.Estado.VENCIDA_REEMBOLSO)
+            vencidas = Reserva.objects.filter(
+                estado=Reserva.Estado.VENCIDA_REEMBOLSO
+            ).select_related('huesped', 'habitacion_preferida')
 
             result = []
-            for r in pendientes:
+            for r in vencidas:
                 result.append({
                     'id': r.id,
                     'huesped': {
@@ -360,6 +370,9 @@ class ReservaViewSet(viewsets.ModelViewSet):
                     'hora_llegada_estimada': r.hora_llegada_estimada,
                     'created_at': r.created_at,
                     'monto_garantia': float(r.monto_garantia or 20.0),
+                    'monto_adelanto': float(r.monto_adelanto or 0.0),
+                    'tipo_pago_adelanto': r.tipo_pago_adelanto,
+                    'estado': r.estado,
                 })
 
             return Response(result)
@@ -396,11 +409,57 @@ class ReservaViewSet(viewsets.ModelViewSet):
                     'hora_llegada_estimada': r.hora_llegada_estimada,
                     'created_at': r.created_at,
                     'monto_garantia': float(r.monto_garantia or 20.0),
+                    'monto_adelanto': float(r.monto_adelanto or 0.0),
+                    'tipo_pago_adelanto': r.tipo_pago_adelanto,
                     'estado': r.estado,
                 })
             return Response(result)
         except Exception:
             return Response([], status=200)
+
+    @action(detail=True, methods=['post'], url_path='devolucion')
+    @transaction.atomic
+    def devolucion(self, request, pk=None):
+        reserva = self.get_object()
+        if reserva.estado != Reserva.Estado.VENCIDA_REEMBOLSO:
+            return Response({'detail': 'La reserva ya no tiene una garantía pendiente de devolución.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        caja_activa = _caja_activa(request.user)
+        if not caja_activa:
+            return Response({'detail': 'Debe aperturar su caja de turno antes de procesar la devolución.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        MovimientoCaja.objects.create(
+            caja=caja_activa,
+            trabajador=caja_activa.trabajador,
+            turno=caja_activa.turno,
+            bloqueado=False,
+            tipo=MovimientoCaja.Tipo.EGRESO,
+            tipo_caja=reserva.tipo_pago_adelanto,
+            modulo=MovimientoCaja.Modulo.HOTEL,
+            referencia=f'Reembolso Reserva #{reserva.id}',
+            monto=reserva.monto_garantia,
+            descripcion=f'Devolución de garantía a {reserva.huesped.nombre} {reserva.huesped.apellido}',
+        )
+        reserva.estado = Reserva.Estado.CANCELADA
+        reserva.notas = f'{reserva.notas}\nGarantía devuelta en caja el {timezone.localdate()}.'.strip()
+        reserva.save(update_fields=['estado', 'notas'])
+        reserva.habitacion_preferida.estado_ocupacion = Habitacion.EstadoOcupacion.DISPONIBLE
+        reserva.habitacion_preferida.save(update_fields=['estado_ocupacion'])
+        return Response({'detail': 'Devolución procesada correctamente.'})
+
+    @action(detail=True, methods=['post'], url_path='penalidad')
+    @transaction.atomic
+    def penalidad(self, request, pk=None):
+        reserva = self.get_object()
+        if reserva.estado != Reserva.Estado.VENCIDA_REEMBOLSO:
+            return Response({'detail': 'La reserva ya no tiene una garantía pendiente de penalidad.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        reserva.estado = Reserva.Estado.CANCELADA
+        reserva.notas = f'{reserva.notas}\nGarantía retenida como penalidad el {timezone.localdate()}.'.strip()
+        reserva.save(update_fields=['estado', 'notas'])
+        reserva.habitacion_preferida.estado_ocupacion = Habitacion.EstadoOcupacion.DISPONIBLE
+        reserva.habitacion_preferida.save(update_fields=['estado_ocupacion'])
+        return Response({'detail': 'Garantía retenida y habitación liberada correctamente.'})
 
     @action(detail=True, methods=['post'], url_path='checkin')
     def checkin(self, request, pk=None):
@@ -503,10 +562,11 @@ class CheckOutCreateView(APIView):
         if checkin.estado == CheckIn.Estado.CERRADO:
             return Response({"detail": "Este hospedaje ya cuenta con Check-Out."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Intentamos cerrar automáticamente cochera vinculada
+        # Cerrar únicamente vehículos activos vinculados a esta estancia.
         vehiculo_activo = RegistroVehiculo.objects.filter(
-            Q(checkin_vinculado_id=checkin_id) | Q(dni_conductor=checkin.huesped.dni_pasaporte),
-            fecha_salida__isnull=True
+            checkin_vinculado_id=checkin_id,
+            fecha_salida__isnull=True,
+            espacio__estado='OCUPADO',
         ).first()
 
         if vehiculo_activo:
@@ -589,7 +649,9 @@ class CheckInActiveListView(APIView):
 
     def get(self, request):
         queryset = (
-            CheckIn.objects.filter(estado=CheckIn.Estado.ACTIVO)
+            CheckIn.objects.filter(
+                Q(estado=CheckIn.Estado.ACTIVO) | Q(fecha_entrada=timezone.localdate())
+            )
             .select_related('habitacion', 'huesped', 'trabajador')
             .order_by('-fecha_entrada', '-hora_entrada')
         )
