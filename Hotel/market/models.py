@@ -7,6 +7,7 @@ from core.base_models import BaseModel
 class Categoria(models.TextChoices):
 	SNACK = 'SNACK', 'Snack'
 	BEBIDA = 'BEBIDA', 'Bebida'
+	ALCOHOL = 'ALCOHOL', 'Bebida alcohólica'
 	HIGIENE = 'HIGIENE', 'Higiene'
 	CHICLE = 'CHICLE', 'Chicle'
 	CARAMELO = 'CARAMELO', 'Caramelo'
@@ -16,18 +17,25 @@ class Categoria(models.TextChoices):
 	VASITOS = 'VASITOS', 'Vasitos'
 
 
-class Producto(BaseModel):
-	class TipoRegistro(models.TextChoices):
-		EXHIBICION = 'EXHIBICION', 'Exhibición'
-		STOCK = 'STOCK', 'Stock'
+class UbicacionStock(models.TextChoices):
+	ALMACEN = 'ALMACEN', 'Almacén'
+	RECEPCION = 'RECEPCION', 'Recepción'
+	REFRIGERADORA = 'REFRIGERADORA', 'Refrigeradora'
 
+
+class Producto(BaseModel):
 	nombre = models.CharField(max_length=150)
 	categoria = models.CharField(max_length=30, choices=Categoria.choices)
 	precio_unitario = models.DecimalField(max_digits=10, decimal_places=2)
-	stock_actual = models.PositiveIntegerField(default=0)
+	stock_almacen = models.PositiveIntegerField(default=0)
+	stock_recepcion = models.PositiveIntegerField(default=0)
+	stock_refrigeradora = models.PositiveIntegerField(default=0)
 	stock_minimo = models.PositiveIntegerField(default=0)
-	tipo_registro = models.CharField(max_length=20, choices=TipoRegistro.choices)
 	activo = models.BooleanField(default=True)
+
+	@property
+	def stock_total(self):
+		return self.stock_almacen + self.stock_recepcion + self.stock_refrigeradora
 
 	def __str__(self) -> str:
 		return self.nombre
@@ -70,6 +78,7 @@ class VentaMarket(BaseModel):
 class DetalleVenta(BaseModel):
 	venta = models.ForeignKey(VentaMarket, on_delete=models.CASCADE, related_name='detalles')
 	producto = models.ForeignKey(Producto, on_delete=models.PROTECT, related_name='detalles_venta')
+	ubicacion_stock = models.CharField(max_length=20, choices=UbicacionStock.choices)
 	cantidad = models.PositiveIntegerField()
 	precio_unitario = models.DecimalField(max_digits=10, decimal_places=2)
 	subtotal = models.DecimalField(max_digits=10, decimal_places=2)

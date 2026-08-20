@@ -1,13 +1,28 @@
 from rest_framework import serializers
 
 from core.base_serializers import BaseSerializer
-from market.models import Categoria, DetalleVenta, IngresoMercaderia, Producto, VentaMarket
+from market.models import Categoria, DetalleVenta, IngresoMercaderia, Producto, UbicacionStock, VentaMarket
 
 
 class ProductoSerializer(BaseSerializer):
+    stock_total = serializers.IntegerField(read_only=True)
+    ubicaciones_disponibles = serializers.SerializerMethodField()
+
     class Meta:
         model = Producto
         fields = '__all__'
+        read_only_fields = ('stock_total', 'ubicaciones_disponibles')
+
+    def get_ubicaciones_disponibles(self, obj):
+        return [
+            ubicacion.value
+            for ubicacion, campo in (
+                (UbicacionStock.ALMACEN, 'stock_almacen'),
+                (UbicacionStock.RECEPCION, 'stock_recepcion'),
+                (UbicacionStock.REFRIGERADORA, 'stock_refrigeradora'),
+            )
+            if getattr(obj, campo) > 0
+        ]
 
 
 class IngresoMercaderiaSerializer(BaseSerializer):
@@ -42,6 +57,7 @@ class IngresoMercaderiaCreateSerializer(serializers.Serializer):
 class VentaDetalleInputSerializer(serializers.Serializer):
     producto_id = serializers.IntegerField()
     cantidad = serializers.IntegerField(min_value=1)
+    ubicacion_stock = serializers.ChoiceField(choices=UbicacionStock.choices)
 
 
 class VentaMarketCreateSerializer(serializers.Serializer):

@@ -8,6 +8,7 @@ import Card from '../components/ui/Card'
 import ModalAperturaCaja from '../components/caja/ModalAperturaCaja'
 import ModalEgresoCaja from '../components/caja/ModalEgresoCaja'
 import ModalAjusteTarifa from '../components/caja/ModalAjusteTarifa'
+import ModalCierreCaja from '../components/caja/ModalCierreCaja'
 
 const getFileNameFromContentDisposition = (contentDisposition) => {
   if (!contentDisposition) return null
@@ -39,6 +40,7 @@ export default function Caja() {
   const [showAjuste, setShowAjuste] = useState(false)
   const [movimientoAjuste, setMovimientoAjuste] = useState(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [showCierre, setShowCierre] = useState(false)
 
   const registrarEgreso = async (payload) => {
     try {
@@ -60,6 +62,19 @@ export default function Caja() {
       window.location.reload()
     } catch (err) {
       alert(err.response?.data?.detail || 'No se pudo aplicar el ajuste.')
+    }
+  }
+
+  const cerrarTurno = async (payload) => {
+    try {
+      setIsSaving(true)
+      await cerrarCaja(payload)
+      setShowCierre(false)
+      window.location.reload()
+    } catch (err) {
+      alert(err.response?.data?.detail || 'No se pudo cerrar la caja.')
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -161,11 +176,7 @@ export default function Caja() {
 
           <Button 
             variant="danger" 
-            onClick={() => {
-              if(window.confirm("¿Estás seguro que deseas cerrar el turno actual?")) {
-                cerrarCaja({})
-              }
-            }}
+            onClick={() => setShowCierre(true)}
             className="bg-red-600 hover:bg-red-700 text-white"
           >
             Finalizar Turno
@@ -181,7 +192,7 @@ export default function Caja() {
         </Card>
         
         <Card className="border-l-4 border-l-green-500">
-          <p className="text-xs font-bold text-slate-500 uppercase">Efectivo Total</p>
+          <p className="text-xs font-bold text-slate-500 uppercase">Efectivo en Cajón</p>
           <p className="text-2xl font-bold text-green-600">S/ {Number(resumen.total_efectivo).toFixed(2)}</p>
         </Card>
 
@@ -266,6 +277,13 @@ export default function Caja() {
         onClose={() => setShowAjuste(false)}
         onSubmit={ajustarTarifa}
         defaultCheckinId={movimientoAjuste?.referencia?.match(/CheckIn #(\d+)/i)?.[1] || ''}
+      />
+      <ModalCierreCaja
+        open={showCierre}
+        onClose={() => setShowCierre(false)}
+        onSubmit={cerrarTurno}
+        montoEsperado={resumen.efectivo_en_cajon ?? resumen.monto_esperado_efectivo ?? resumen.total_efectivo}
+        isSaving={isSaving}
       />
     </div>
   )

@@ -34,16 +34,20 @@ class CajaService(BaseService):
         )
 
     @transaction.atomic
-    def cerrar_caja(self, caja):
-        # El cierre oficial también debe basarse estrictamente en ingresos y egresos reales
-        ingresos = caja.movimientos.filter(tipo=MovimientoCaja.Tipo.INGRESO).aggregate(total=Sum('monto')).get('total') or 0
-        egresos = caja.movimientos.filter(tipo=MovimientoCaja.Tipo.EGRESO).aggregate(total=Sum('monto')).get('total') or 0
-        
-        monto_final = float(caja.monto_inicial) + float(ingresos) - float(egresos)
+    def cerrar_caja(self, caja, datos):
+        ingresos_efectivo = caja.movimientos.filter(
+            tipo=MovimientoCaja.Tipo.INGRESO,
+            tipo_caja=MovimientoCaja.TipoCaja.EFECTIVO,
+        ).aggregate(total=Sum('monto')).get('total') or Decimal('0')
+        egresos_efectivo = caja.movimientos.filter(
+            tipo=MovimientoCaja.Tipo.EGRESO,
+            tipo_caja=MovimientoCaja.TipoCaja.EFECTIVO,
+        ).aggregate(total=Sum('monto')).get('total') or Decimal('0')
+        monto_esperado = Decimal(caja.monto_inicial) + ingresos_efectivo - egresos_efectivo
+        monto_real = datos['monto_real']
+        diferencia = monto_real - monto_esperado
         fecha_cierre = timezone.localdate()
         hora_cierre = timezone.localtime().time()
-        fecha_hora_cierre = timezone.localtime()
-
         caja.movimientos.update(
             bloqueado=True,
             trabajador=caja.trabajador,
@@ -54,7 +58,11 @@ class CajaService(BaseService):
             caja.id,
             fecha_cierre=fecha_cierre,
             hora_cierre=hora_cierre,
-            monto_final=monto_final,
+            monto_final=monto_real,
+            monto_esperado=monto_esperado,
+            monto_real=monto_real,
+            diferencia=diferencia,
+            notas_cierre=datos.get('notas', ''),
             estado=Caja.Estado.CERRADA,
         )
 
@@ -63,7 +71,7 @@ class CajaService(BaseService):
         movimientos = caja.movimientos.all().order_by('fecha_hora')
         
         # SOLUCIÓN DEL BUG: Filtramos por tipo_caja pero asegurando que SOLO sume el dinero que ingresó realmente
-        total_efectivo = movimientos.filter(
+        ingresos_efectivo = movimientos.filter(
             tipo_caja=MovimientoCaja.TipoCaja.EFECTIVO, 
             tipo=MovimientoCaja.Tipo.INGRESO
         ).aggregate(total=Sum('monto')).get('total') or 0
@@ -72,8 +80,8 @@ class CajaService(BaseService):
             tipo=MovimientoCaja.Tipo.EGRESO,
         ).aggregate(total=Sum('monto')).get('total') or 0
 
-        total_yape = movimientos.filter(
-            tipo_caja=MovimientoCaja.TipoCaja.YAPE, 
+        ingresos_yape = movimientos.filter(
+            tipo_caja__in=[MovimientoCaja.TipoCaja.YAPE, MovimientoCaja.TipoCaja.PLIN],
             tipo=MovimientoCaja.Tipo.INGRESO
         ).aggregate(total=Sum('monto')).get('total') or 0
         egresos_yape = movimientos.filter(
@@ -81,7 +89,7 @@ class CajaService(BaseService):
             tipo=MovimientoCaja.Tipo.EGRESO,
         ).aggregate(total=Sum('monto')).get('total') or 0
 
-        total_tarjeta = movimientos.filter(
+        ingresos_tarjeta = movimientos.filter(
             tipo_caja=MovimientoCaja.TipoCaja.TARJETA, 
             tipo=MovimientoCaja.Tipo.INGRESO
         ).aggregate(total=Sum('monto')).get('total') or 0
@@ -95,19 +103,26 @@ class CajaService(BaseService):
         deudas = movimientos.filter(tipo=MovimientoCaja.Tipo.DEUDA, pagada=False)
         
         # OPERACIÓN MATEMÁTICA PURA: Monto Inicial + lo recaudado en los diferentes métodos - salidas efectivas
-        total_general = float(caja.monto_inicial) + float(total_ingresos) - float(total_egresos)
+        efectivo_neto = float(caja.monto_inicial) + float(ingresos_efectivo) - float(egresos_efectivo)
+        yape_neto = float(ingresos_yape) - float(egresos_yape)
+        tarjeta_neta = float(ingresos_tarjeta) - float(egresos_tarjeta)
+        total_general = efectivo_neto + yape_neto + tarjeta_neta
         
         return {
             'monto_inicial': caja.monto_inicial,
-            'total_efectivo': total_efectivo,
+            'total_efectivo': efectivo_neto,
+            'ingresos_efectivo': ingresos_efectivo,
             'egresos_efectivo': egresos_efectivo,
-            'total_yape': total_yape,
+            'total_yape': yape_neto,
+            'ingresos_yape': ingresos_yape,
             'egresos_yape': egresos_yape,
-            'total_tarjeta': total_tarjeta,
+            'total_tarjeta': tarjeta_neta,
+            'ingresos_tarjeta': ingresos_tarjeta,
             'egresos_tarjeta': egresos_tarjeta,
             'total_ingresos': total_ingresos,
             'total_egresos': total_egresos,
             'total_general': total_general,  
+            'monto_esperado_efectivo': efectivo_neto,
             'deudas_pendientes': deudas,
             'movimientos': movimientos,
         }

@@ -23,6 +23,10 @@ class Caja(BaseModel):
 	fecha_cierre = models.DateField(null=True, blank=True)
 	hora_cierre = models.TimeField(null=True, blank=True)
 	monto_final = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+	monto_esperado = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+	monto_real = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+	diferencia = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+	notas_cierre = models.TextField(blank=True)
 	estado = models.CharField(max_length=20, choices=Estado.choices, default=Estado.ABIERTA)
 
 	def __str__(self) -> str:

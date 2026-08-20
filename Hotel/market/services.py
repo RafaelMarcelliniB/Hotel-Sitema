@@ -1,6 +1,7 @@
 from django.db import transaction
 from core.base_services import BaseService
 from hotel.models import CheckIn
+from market.models import UbicacionStock
 from market.repositories import DetalleVentaRepository, IngresoMercaderiaRepository, ProductoRepository, VentaMarketRepository
 
 # Importaciones de caja activa
@@ -28,7 +29,10 @@ class IngresoMercaderiaService(BaseService):
             fecha=ingreso_data.get('fecha'),
             trabajador=trabajador,
         )
-        producto_repo.update(producto.id, stock_actual=producto.stock_actual + ingreso_data['cantidad'])
+        producto_repo.update(
+            producto.id,
+            stock_almacen=producto.stock_almacen + ingreso_data['cantidad'],
+        )
         return ingreso
 
 
@@ -60,9 +64,16 @@ class VentaMarketService(BaseService):
         for item in detalles_data:
             producto = self.producto_repo.get_by_id(item['producto_id'])
             amount = item['cantidad']
+            ubicacion = item['ubicacion_stock']
+            campo_stock = {
+                UbicacionStock.ALMACEN: 'stock_almacen',
+                UbicacionStock.RECEPCION: 'stock_recepcion',
+                UbicacionStock.REFRIGERADORA: 'stock_refrigeradora',
+            }[ubicacion]
+            stock_disponible = getattr(producto, campo_stock)
 
-            if producto.stock_actual < amount:
-                raise ValueError(f"Stock insuficiente para el producto: {producto.nombre}")
+            if stock_disponible < amount:
+                raise ValueError(f"Stock insuficiente en {UbicacionStock(ubicacion).label} para el producto: {producto.nombre}")
 
             subtotal = producto.precio_unitario * amount
             total_venta += subtotal
@@ -70,13 +81,16 @@ class VentaMarketService(BaseService):
             self.detalle_repo.create(
                 venta=venta,
                 producto=producto,
+                ubicacion_stock=ubicacion,
                 cantidad=amount,
                 precio_unitario=producto.precio_unitario,
                 subtotal=subtotal
             )
 
-            nuevo_stock = producto.stock_actual - amount
-            self.producto_repo.update(producto.id, stock_actual=nuevo_stock)
+            self.producto_repo.update(
+                producto.id,
+                **{campo_stock: stock_disponible - amount},
+            )
 
         self.repository.update(venta.id, total=total_venta)
         

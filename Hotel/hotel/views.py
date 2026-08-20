@@ -650,9 +650,11 @@ class CheckInActiveListView(APIView):
     def get(self, request):
         queryset = (
             CheckIn.objects.filter(
-                Q(estado=CheckIn.Estado.ACTIVO) | Q(fecha_entrada=timezone.localdate())
+                estado=CheckIn.Estado.ACTIVO,
+                habitacion__estado_ocupacion=Habitacion.EstadoOcupacion.OCUPADO,
             )
             .select_related('habitacion', 'huesped', 'trabajador')
+			.distinct()
             .order_by('-fecha_entrada', '-hora_entrada')
         )
         return Response([_serializar_detalle_checkin(checkin) for checkin in queryset])

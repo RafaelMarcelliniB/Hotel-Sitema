@@ -23,6 +23,10 @@ class EspacioCocheraSerializer(BaseSerializer):
                     "dni_conductor": registro.dni_conductor,
                     "hora_entrada": str(registro.hora_entrada),
                     "fecha_entrada": str(registro.fecha_entrada),
+                    "tipo_vehiculo": registro.tipo_vehiculo,
+                    "habitacion": registro.checkin_vinculado.habitacion.numero if registro.checkin_vinculado else None,
+                    "hora_salida_estimada": registro.hora_salida_estimada,
+                    "observaciones": registro.observaciones,
                     "tarifa_tipo": registro.tarifa_tipo,
                     "monto_total": str(registro.monto_total),
                     "tipo_cliente": registro.tipo_cliente  # 🔥 Línea agregada para solucionar el bug
@@ -60,6 +64,8 @@ class RegistroVehiculoIngresoSerializer(serializers.Serializer):
     tarifa_tipo = serializers.ChoiceField(choices=RegistroVehiculo.TarifaTipo.choices)
     monto = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0, required=False, default=0)
     detalle_tiempo = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    hora_salida_estimada = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    observaciones = serializers.CharField(required=False, allow_blank=True)
     es_huesped = serializers.BooleanField(required=False, default=False)
 
     def validate(self, attrs):

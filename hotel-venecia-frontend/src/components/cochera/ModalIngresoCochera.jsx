@@ -5,6 +5,21 @@ import { Button } from '../ui/Button'
 import { useEspacios } from '../../hooks/useEspacios'
 import api from '../../api/axiosConfig'
 
+function formatearHora(hora) {
+  const periodo = hora < 12 ? 'AM' : 'PM'
+  const hora12 = hora % 12 || 12
+  return `${String(hora12).padStart(2, '0')}:00 ${periodo}`
+}
+
+function generarIntervalosHora() {
+  return Array.from({ length: 24 }, (_, hora) => {
+    const siguienteHora = (hora + 1) % 24
+    return `${formatearHora(hora)} - ${formatearHora(siguienteHora)}`
+  })
+}
+
+const intervalosHoraSalida = generarIntervalosHora()
+
 export default function ModalIngresoCochera({ espacio, onClose }) {
   const { registrarIngreso } = useEspacios()
   const [checkinsActivos, setCheckinsActivos] = useState([])
@@ -29,11 +44,14 @@ export default function ModalIngresoCochera({ espacio, onClose }) {
       marca: '',
       color: '',
       nombre_conductor: '',
-      dni_conductor: ''
+      dni_conductor: '',
+      hora_salida_estimada: '',
+      observaciones: ''
     }
   })
 
   const watchTipoCliente = watch('tipo_cliente')
+  const checkinField = register('checkin_vinculado_id', { required: watchTipoCliente === 'HUESPED' })
 
   // Aseguramos que el tipo de vehículo venga fijado al tipo del espacio y no sea editable
   useEffect(() => {
@@ -99,6 +117,8 @@ export default function ModalIngresoCochera({ espacio, onClose }) {
         tarifa_tipo: data.tarifa_tipo,
         monto,
         detalle_tiempo: data.detalle_tiempo?.trim() || '',
+        hora_salida_estimada: data.hora_salida_estimada?.trim() || '',
+        observaciones: data.observaciones?.trim() || '',
         es_huesped: watchTipoCliente === 'HUESPED',
         checkin_vinculado_id: data.checkin_vinculado_id ? parseInt(data.checkin_vinculado_id, 10) : null,
       }
@@ -141,8 +161,11 @@ export default function ModalIngresoCochera({ espacio, onClose }) {
               <p className="text-xs text-blue-600">Cargando habitaciones ocupadas...</p>
             ) : (
               <select 
-                {...register('checkin_vinculado_id', { required: watchTipoCliente === 'HUESPED' })}
-                onChange={handleCheckinChange} // Intercepta el cambio para autocompletar
+                {...checkinField}
+                onChange={(event) => {
+                  checkinField.onChange(event)
+                  handleCheckinChange(event)
+                }}
                 className={inputStyle}
               >
                 <option value="">-- Seleccione una habitación activa --</option>
@@ -216,6 +239,30 @@ export default function ModalIngresoCochera({ espacio, onClose }) {
               className={inputStyle} 
               {...register('dni_conductor')} 
               readOnly={watchTipoCliente === 'HUESPED' && !!watch('checkin_vinculado_id')}
+            />
+          </div>
+        </div>
+
+        {/* TIPOS DE COBRO */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <div>
+            <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Hora Estimada de Salida</label>
+            <select {...register('hora_salida_estimada')} className={inputStyle}>
+              <option value="">Por confirmar / Sin horario</option>
+              {intervalosHoraSalida.map((intervalo) => (
+                <option key={intervalo} value={intervalo}>
+                  {intervalo}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Observaciones / Notas</label>
+            <textarea
+              rows="1"
+              placeholder="Guardar espacio"
+              className={inputStyle}
+              {...register('observaciones')}
             />
           </div>
         </div>

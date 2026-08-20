@@ -32,7 +32,17 @@ export default function Cochera() {
               {espacio.estado === 'OCUPADO' ? (
                 <div>
                   <p className="text-lg font-bold text-red-700 tracking-widest">{espacio.placa || 'PLACA-123'}</p>
+                  <p className="text-xs text-slate-600">Tipo: {espacio.vehiculo_actual?.tipo_vehiculo || espacio.tipo}</p>
+                  {espacio.vehiculo_actual?.habitacion && (
+                    <p className="text-xs text-slate-600">Habitación: Hab. {espacio.vehiculo_actual.habitacion}</p>
+                  )}
                   <p className="text-xs text-slate-500">Ingreso: {espacio.hora_ingreso || '14:20 PM'}</p>
+                  {espacio.vehiculo_actual?.hora_salida_estimada && (
+                    <p className="text-xs text-slate-600">Salida estimada: {espacio.vehiculo_actual.hora_salida_estimada}</p>
+                  )}
+                  {espacio.vehiculo_actual?.observaciones && (
+                    <p className="text-xs text-slate-600">Nota: {espacio.vehiculo_actual.observaciones}</p>
+                  )}
                   {/* Mostrar tipo de cliente si existe el registro actual */}
                   {espacio.vehiculo_actual?.tipo_cliente && (
                     <p className="text-xs mt-1">

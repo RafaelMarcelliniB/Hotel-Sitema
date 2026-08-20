@@ -74,11 +74,16 @@ def _serializar_resumen(caja):
         'caja': CajaSerializer(caja).data,
         'monto_inicial': resumen['monto_inicial'],
         'total_efectivo': resumen['total_efectivo'],
+        'ingresos_efectivo': resumen['ingresos_efectivo'],
         'total_yape': resumen['total_yape'],
+        'ingresos_yape': resumen['ingresos_yape'],
         'total_tarjeta': resumen['total_tarjeta'],
+        'ingresos_tarjeta': resumen['ingresos_tarjeta'],
         'total_ingresos': resumen['total_ingresos'],
         'total_egresos': resumen['total_egresos'],
         'total_general': resumen['total_general'],  # <-- AGREGADO: Envía el total real al JSON del Frontend
+        'efectivo_en_cajon': resumen['monto_esperado_efectivo'],
+        'monto_esperado_efectivo': resumen['monto_esperado_efectivo'],
         'deudas_pendientes': MovimientoCajaSerializer(resumen['deudas_pendientes'], many=True).data,
         'movimientos': movimientos_serializados,
         'movimientos_por_modulo': {modulo: items for modulo, items in agrupados.items()},
@@ -118,7 +123,18 @@ class CajaCierreView(APIView):
         serializer = CajaCierreSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
-        caja_cerrada = CajaService().cerrar_caja(caja)
+        caja_cerrada = CajaService().cerrar_caja(caja, serializer.validated_data)
+        from users.models import AuditLog
+        AuditLog.objects.create(
+            trabajador=request.user,
+            accion='caja_cerrada',
+            modulo='caja',
+            detalle=(
+                f'Caja #{caja.id}; esperado={caja_cerrada.monto_esperado}; '
+                f'real={caja_cerrada.monto_real}; diferencia={caja_cerrada.diferencia}; '
+                f'notas={caja_cerrada.notas_cierre}'
+            ),
+        )
         return Response(CajaSerializer(caja_cerrada).data)
 
 
@@ -531,7 +547,7 @@ class CajaReporteExcelView(APIView):
 
         ws3 = wb.create_sheet(title='Resumen por pago')
         ws3.append(['Concepto', 'Efectivo', 'Yape', 'Tarjeta', 'Total'])
-        ws3.append(['Ingresos', float(resumen['total_efectivo']), float(resumen['total_yape']), float(resumen['total_tarjeta']), float(resumen['total_ingresos'])])
+        ws3.append(['Ingresos', float(resumen['ingresos_efectivo']), float(resumen['ingresos_yape']), float(resumen['ingresos_tarjeta']), float(resumen['total_ingresos'])])
         ws3.append(['Egresos', float(resumen['egresos_efectivo']), float(resumen['egresos_yape']), float(resumen['egresos_tarjeta']), float(resumen['total_egresos'])])
         ws3.append(['Monto inicial', float(resumen['monto_inicial']), 0, 0, float(resumen['monto_inicial'])])
         ws3.append(['Total general', '', '', '', float(resumen['total_general'])])

@@ -24,7 +24,10 @@ class CajaAperturaSerializer(serializers.Serializer):
 
 
 class CajaCierreSerializer(serializers.Serializer):
-    pass
+    monto_esperado = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0'))
+    monto_real = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0'))
+    diferencia = serializers.DecimalField(max_digits=10, decimal_places=2)
+    notas = serializers.CharField(required=False, allow_blank=True)
 
 
 class MovimientoCajaInputSerializer(serializers.Serializer):

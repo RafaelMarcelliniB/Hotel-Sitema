@@ -41,6 +41,7 @@ def _serializar_venta(venta):
 			{
 				'id': detalle.id,
 				'producto_id': detalle.producto_id,
+				'ubicacion_stock': detalle.ubicacion_stock,
 				'producto': detalle.producto.nombre,
 				'cantidad': detalle.cantidad,
 				'precio_unitario': detalle.precio_unitario,
@@ -60,7 +61,9 @@ class ProductoViewSet(viewsets.ModelViewSet):
 		queryset = super().get_queryset()
 		stock_bajo = self.request.query_params.get('stock_bajo')
 		if stock_bajo and stock_bajo.lower() == 'true':
-			return queryset.filter(stock_actual__lte=F('stock_minimo'))
+			return queryset.annotate(
+				stock_total_calculado=F('stock_almacen') + F('stock_recepcion') + F('stock_refrigeradora'),
+			).filter(stock_total_calculado__lte=F('stock_minimo'))
 		activo = self.request.query_params.get('activo')
 		if activo and activo.lower() == 'true':
 			return queryset.filter(activo=True)
@@ -68,7 +71,9 @@ class ProductoViewSet(viewsets.ModelViewSet):
 
 	@action(detail=False, methods=['get'], url_path='bajo-stock')
 	def bajo_stock(self, request):
-		queryset = self.get_queryset().filter(stock_actual__lte=F('stock_minimo'))
+		queryset = self.get_queryset().annotate(
+			stock_total_calculado=F('stock_almacen') + F('stock_recepcion') + F('stock_refrigeradora'),
+		).filter(stock_total_calculado__lte=F('stock_minimo'))
 		return Response(self.get_serializer(queryset, many=True).data)
 
 
@@ -184,7 +189,7 @@ class PreviewProductosExcelView(APIView):
 
 		col_map = { _norm(c): c for c in df.columns }
 
-		expected = ['Nombre', 'Categoria', 'Precio Unitario', 'Stock Actual', 'Stock Minimo', 'Tipo Registro', 'Activo']
+		expected = ['Nombre', 'Categoria', 'Precio Unitario', 'Stock Almacen', 'Stock Recepcion', 'Stock Refrigeradora', 'Stock Minimo', 'Activo']
 		rows = []
 		for idx, raw_row in df.head(20).iterrows():
 			row = raw_row.fillna('')
@@ -200,9 +205,10 @@ class PreviewProductosExcelView(APIView):
 				'Nombre': str(val('Nombre')),
 				'Categoria': str(val('Categoria')),
 				'Precio Unitario': str(val('Precio Unitario')),
-				'Stock Actual': str(val('Stock Actual')),
+				'Stock Almacen': str(val('Stock Almacen')),
+				'Stock Recepcion': str(val('Stock Recepcion')),
+				'Stock Refrigeradora': str(val('Stock Refrigeradora')),
 				'Stock Minimo': str(val('Stock Minimo')),
-				'Tipo Registro': str(val('Tipo Registro')),
 				'Activo': str(val('Activo')),
 			})
 
@@ -242,9 +248,6 @@ class ImportarProductosExcelView(APIView):
 			return col
 
 		col_map = { _norm(c): c for c in df.columns }
-
-		# Mapeos de elección tipo registro y categorías disponibles
-		tipo_map = { _norm(label): value for (value, label) in Producto.TipoRegistro.choices }
 
 		# también mapa de etiquetas -> valor para categorias (labels de choices)
 		categoria_map = { _norm(label): value for (value, label) in Producto._meta.get_field('categoria').choices }
@@ -290,12 +293,19 @@ class ImportarProductosExcelView(APIView):
 				except (InvalidOperation, TypeError):
 					raise ValueError(f'Precio Unitario inválido: {precio_raw}')
 
-				# Stock actual
-				stock_actual_raw = val('Stock Actual')
-				try:
-					stock_actual = int(stock_actual_raw) if stock_actual_raw != '' else 0
-				except Exception:
-					raise ValueError(f'Stock Actual inválido: {stock_actual_raw}')
+				def stock_value(label):
+					raw_value = val(label)
+					try:
+						value = int(raw_value) if raw_value != '' else 0
+					except Exception:
+						raise ValueError(f'{label} inválido: {raw_value}')
+					if value < 0:
+						raise ValueError(f'{label} no puede ser negativo')
+					return value
+
+				stock_almacen = stock_value('Stock Almacen')
+				stock_recepcion = stock_value('Stock Recepcion')
+				stock_refrigeradora = stock_value('Stock Refrigeradora')
 
 				# Stock minimo
 				stock_minimo_raw = val('Stock Minimo')
@@ -305,11 +315,6 @@ class ImportarProductosExcelView(APIView):
 						stock_minimo = int(stock_minimo_raw)
 					except Exception:
 						raise ValueError(f'Stock Minimo inválido: {stock_minimo_raw}')
-
-				# Tipo registro
-				tipo_raw = str(val('Tipo Registro')).strip()
-				tipo_key = _norm(tipo_raw)
-				tipo_registro = tipo_map.get(tipo_key) if tipo_raw else Producto.TipoRegistro.STOCK
 
 				# Activo
 				activo_raw = str(val('Activo')).strip().lower()
@@ -325,9 +330,10 @@ class ImportarProductosExcelView(APIView):
 				producto, created_flag = Producto.objects.get_or_create(nombre=nombre, defaults={
 					'categoria': categoria,
 					'precio_unitario': precio_unitario,
-					'stock_actual': stock_actual,
+					'stock_almacen': stock_almacen,
+					'stock_recepcion': stock_recepcion,
+					'stock_refrigeradora': stock_refrigeradora,
 					'stock_minimo': stock_minimo,
-					'tipo_registro': tipo_registro,
 					'activo': activo,
 				})
 
@@ -337,9 +343,10 @@ class ImportarProductosExcelView(APIView):
 					# Actualizar campos relevantes
 					producto.categoria = categoria
 					producto.precio_unitario = precio_unitario
-					producto.stock_actual = stock_actual
+					producto.stock_almacen = stock_almacen
+					producto.stock_recepcion = stock_recepcion
+					producto.stock_refrigeradora = stock_refrigeradora
 					producto.stock_minimo = stock_minimo
-					producto.tipo_registro = tipo_registro
 					producto.activo = activo
 					producto.save()
 					updated += 1
@@ -363,8 +370,8 @@ class DescargarPlantillaProductosView(APIView):
 
     def get(self, request, formato=None):
         required_headers = [
-            'Nombre', 'Categoria', 'Precio Unitario', 'Stock Actual',
-            'Stock Minimo', 'Tipo Registro', 'Activo'
+			'Nombre', 'Categoria', 'Precio Unitario', 'Stock Almacen',
+			'Stock Recepcion', 'Stock Refrigeradora', 'Stock Minimo', 'Activo'
         ]
 
         # DataFrame vacío con las columnas en el orden esperado
