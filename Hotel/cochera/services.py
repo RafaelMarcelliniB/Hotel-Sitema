@@ -21,6 +21,12 @@ class RegistroVehiculoService(BaseService):
         super().__init__()
         self.espacio_repo = EspacioCocheraRepository()
 
+    def _es_cortesia_huesped(self, registro):
+        return (
+            getattr(registro, 'tipo_cliente', None) == RegistroVehiculo.TipoCliente.HUESPED
+            or getattr(registro, 'checkin_vinculado_id', None) is not None
+        )
+
     def _obtener_caja_activa(self, trabajador):
         hoy = timezone.localdate()
         filtros = {
@@ -63,6 +69,8 @@ class RegistroVehiculoService(BaseService):
 
     def calcular_monto_para_registro(self, registro_id):
         registro = RegistroVehiculo.objects.get(pk=registro_id)
+        if self._es_cortesia_huesped(registro):
+            return Decimal('0')
         return self._calcular_monto(registro.tarifa_tipo, registro.fecha_entrada, registro.hora_entrada)
 
     @transaction.atomic
@@ -124,15 +132,18 @@ class RegistroVehiculoService(BaseService):
     def registrar_salida(self, registro_id):
         # 1. Obtener la instancia real del registro desde el repositorio
         registro = self.repository.get_by_id(registro_id)
-        
+
         if registro.fecha_salida:
             raise ValueError("Este vehículo ya registró su salida.")
 
-        monto_calculado = registro.monto_total if registro.monto_total and registro.monto_total > 0 else self._calcular_monto(
-            registro.tarifa_tipo,
-            registro.fecha_entrada,
-            registro.hora_entrada,
-        )
+        if self._es_cortesia_huesped(registro):
+            monto_calculado = Decimal('0')
+        else:
+            monto_calculado = registro.monto_total if registro.monto_total and registro.monto_total > 0 else self._calcular_monto(
+                registro.tarifa_tipo,
+                registro.fecha_entrada,
+                registro.hora_entrada,
+            )
 
         try:
             monto_calculado = Decimal(str(monto_calculado))

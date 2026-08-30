@@ -23,7 +23,7 @@ export default function ImportUploader({ onDone }) {
     return () => document.removeEventListener('click', onDocClick)
   }, [])
 
-  const headers = ['Nombre', 'Categoria', 'Precio Unitario', 'Stock Actual', 'Stock Minimo', 'Tipo Registro', 'Activo']
+  const headers = ['Nombre', 'Categoria', 'Precio Unitario', 'Stock Almacen', 'Stock Recepcion', 'Stock Refrigeradora', 'Stock Minimo', 'Activo']
 
   async function downloadTemplate(format) {
     try {

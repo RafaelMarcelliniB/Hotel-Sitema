@@ -86,6 +86,25 @@ class DetalleVenta(BaseModel):
 	def __str__(self) -> str:
 		return f'{self.producto} x {self.cantidad}'
 
+
+class StockTransfer(BaseModel):
+	producto = models.ForeignKey(
+		Producto, on_delete=models.PROTECT, related_name='transferencias'
+	)
+	origen = models.CharField(max_length=20, choices=UbicacionStock.choices)
+	destino = models.CharField(max_length=20, choices=UbicacionStock.choices)
+	cantidad = models.PositiveIntegerField()
+	trabajador = models.ForeignKey(
+		settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='transferencias_realizadas'
+	)
+	motivo = models.CharField(max_length=200, blank=True)
+
+	class Meta:
+		ordering = ['-created_at']
+
+	def __str__(self) -> str:
+		return f'Transferencia {self.id}: {self.producto.nombre} {self.get_origen_display()}→{self.get_destino_display()} {self.cantidad}'
+
 # ════════════════════════════════════════
 # SOLID APLICADO EN ESTE ARCHIVO:
 # S - Single Responsibility: define solo catálogo, ingresos y ventas del módulo market.

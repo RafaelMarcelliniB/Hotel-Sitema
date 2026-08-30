@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from core.base_serializers import BaseSerializer
-from market.models import Categoria, DetalleVenta, IngresoMercaderia, Producto, UbicacionStock, VentaMarket
+from market.models import Categoria, DetalleVenta, IngresoMercaderia, Producto, StockTransfer, UbicacionStock, VentaMarket
 
 
 class ProductoSerializer(BaseSerializer):
@@ -65,6 +65,20 @@ class VentaMarketCreateSerializer(serializers.Serializer):
     checkin_vinculado_id = serializers.IntegerField(required=False, allow_null=True)
     metodo_pago = serializers.ChoiceField(choices=VentaMarket.MetodoPago.choices)
     detalles = VentaDetalleInputSerializer(many=True)
+
+
+class StockTransferCreateSerializer(serializers.Serializer):
+    producto_id = serializers.IntegerField(required=False, allow_null=True)
+    origen = serializers.ChoiceField(choices=UbicacionStock.choices)
+    destino = serializers.ChoiceField(choices=UbicacionStock.choices)
+    cantidad = serializers.IntegerField(min_value=1)
+    motivo = serializers.CharField(max_length=200, required=False, allow_blank=True)
+
+
+class StockTransferSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StockTransfer
+        fields = '__all__'
 
 # ════════════════════════════════════════
 # SOLID APLICADO EN ESTE ARCHIVO:

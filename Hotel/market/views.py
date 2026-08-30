@@ -9,21 +9,54 @@ from django.utils import timezone
 import traceback
 
 from caja.permissions import CajaAbertaPermission
-from market.models import IngresoMercaderia, Producto, VentaMarket, Categoria
+from market.models import IngresoMercaderia, Producto, VentaMarket, Categoria, StockTransfer
 from market.serializers import (
 	IngresoMercaderiaCreateSerializer,
 	IngresoMercaderiaSerializer,
 	ProductoSerializer,
 	VentaMarketCreateSerializer,
 	VentaMarketSerializer,
+	StockTransferSerializer,
+	StockTransferCreateSerializer,
 )
-from market.services import IngresoMercaderiaService, VentaMarketService, ProductoService
+from market.services import IngresoMercaderiaService, VentaMarketService, ProductoService, StockTransferService
 import pandas as pd
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from django.http import HttpResponse
 import unicodedata
 
+
+def _normalize_text(value):
+	if not isinstance(value, str):
+		return ''
+	value = value.strip()
+	value = unicodedata.normalize('NFKD', value)
+	value = value.encode('ascii', 'ignore').decode('ascii')
+	value = value.lower()
+	value = ''.join(ch for ch in value if ch.isalnum())
+	return value
+
+
+def _get_first_matching_value(row, col_map, *labels):
+	for label in labels:
+		key = _normalize_text(label)
+		orig = col_map.get(key)
+		if orig is not None:
+			return row.get(orig, '')
+	return ''
+
+
+def _parse_stock_value(raw_value, label):
+	if raw_value is None or str(raw_value).strip() == '':
+		return 0
+	try:
+		value = int(raw_value)
+	except (TypeError, ValueError):
+		raise ValueError(f'{label} inválido: {raw_value}')
+	if value < 0:
+		raise ValueError(f'{label} no puede ser negativo')
+	return value
 
 
 def _serializar_venta(venta):
@@ -75,6 +108,37 @@ class ProductoViewSet(viewsets.ModelViewSet):
 			stock_total_calculado=F('stock_almacen') + F('stock_recepcion') + F('stock_refrigeradora'),
 		).filter(stock_total_calculado__lte=F('stock_minimo'))
 		return Response(self.get_serializer(queryset, many=True).data)
+
+	@action(detail=True, methods=['post'], url_path='transferir')
+	def transferir_stock(self, request, pk=None):
+		serializer = StockTransferCreateSerializer(data=request.data)
+		serializer.is_valid(raise_exception=True)
+		data = serializer.validated_data
+		producto_id = data.get('producto_id', pk)
+		if producto_id is None:
+			raise ValueError('Debe indicar el producto a transferir.')
+
+		transferencia = StockTransferService().transferir_stock(
+			producto_id=producto_id,
+			origen=data['origen'],
+			destino=data['destino'],
+			cantidad=data['cantidad'],
+			trabajador=request.user,
+			motivo=data.get('motivo', ''),
+		)
+
+		return Response(StockTransferSerializer(transferencia).data, status=status.HTTP_200_OK)
+
+	@action(detail=True, methods=['get'], url_path='transferencias')
+	def transferencias_historial(self, request, pk=None):
+		producto = self.get_queryset().get(pk=pk)
+		transferencias = producto.transferencias.all()
+		page = self.paginate_queryset(transferencias)
+		if page is not None:
+			serializer = StockTransferSerializer(page, many=True)
+			return self.get_paginated_response(serializer.data)
+		serializer = StockTransferSerializer(transferencias, many=True)
+		return Response(serializer.data)
 
 
 class IngresoMercaderiaViewSet(viewsets.ModelViewSet):
@@ -176,40 +240,25 @@ class PreviewProductosExcelView(APIView):
 		except Exception as e:
 			return Response({'detail': f'Error al leer el archivo: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
 
-		# Normalizar nombres de columnas para búsqueda robusta
-		def _norm(col):
-			if not isinstance(col, str):
-				return ''
-			col = col.strip()
-			col = unicodedata.normalize('NFKD', col)
-			col = col.encode('ascii', 'ignore').decode('ascii')
-			col = col.lower()
-			col = ''.join(ch for ch in col if ch.isalnum())
-			return col
-
-		col_map = { _norm(c): c for c in df.columns }
+		col_map = {_normalize_text(c): c for c in df.columns}
 
 		expected = ['Nombre', 'Categoria', 'Precio Unitario', 'Stock Almacen', 'Stock Recepcion', 'Stock Refrigeradora', 'Stock Minimo', 'Activo']
 		rows = []
 		for idx, raw_row in df.head(20).iterrows():
 			row = raw_row.fillna('')
-			def val(label):
-				key = _norm(label)
-				orig = col_map.get(key)
-				if orig is None:
-					return ''
-				return row.get(orig, '')
-
+			stock_almacen = _get_first_matching_value(row, col_map, 'Stock Almacen', 'Stock Actual')
+			stock_recepcion = _get_first_matching_value(row, col_map, 'Stock Recepcion')
+			stock_refrigeradora = _get_first_matching_value(row, col_map, 'Stock Refrigeradora')
 			rows.append({
 				'fila': int(idx) + 2,
-				'Nombre': str(val('Nombre')),
-				'Categoria': str(val('Categoria')),
-				'Precio Unitario': str(val('Precio Unitario')),
-				'Stock Almacen': str(val('Stock Almacen')),
-				'Stock Recepcion': str(val('Stock Recepcion')),
-				'Stock Refrigeradora': str(val('Stock Refrigeradora')),
-				'Stock Minimo': str(val('Stock Minimo')),
-				'Activo': str(val('Activo')),
+				'Nombre': str(_get_first_matching_value(row, col_map, 'Nombre')),
+				'Categoria': str(_get_first_matching_value(row, col_map, 'Categoria')),
+				'Precio Unitario': str(_get_first_matching_value(row, col_map, 'Precio Unitario')),
+				'Stock Almacen': str(stock_almacen),
+				'Stock Recepcion': str(stock_recepcion),
+				'Stock Refrigeradora': str(stock_refrigeradora),
+				'Stock Minimo': str(_get_first_matching_value(row, col_map, 'Stock Minimo')),
+				'Activo': str(_get_first_matching_value(row, col_map, 'Activo')),
 			})
 
 		return Response({'preview': rows})
@@ -236,49 +285,26 @@ class ImportarProductosExcelView(APIView):
 		updated = 0
 		errors = []
 
-		# Normalización de columnas
-		def _norm(col):
-			if not isinstance(col, str):
-				return ''
-			col = col.strip()
-			col = unicodedata.normalize('NFKD', col)
-			col = col.encode('ascii', 'ignore').decode('ascii')
-			col = col.lower()
-			col = ''.join(ch for ch in col if ch.isalnum())
-			return col
-
-		col_map = { _norm(c): c for c in df.columns }
-
-		# también mapa de etiquetas -> valor para categorias (labels de choices)
-		categoria_map = { _norm(label): value for (value, label) in Producto._meta.get_field('categoria').choices }
+		col_map = {_normalize_text(c): c for c in df.columns}
+		categoria_map = {_normalize_text(label): value for (value, label) in Producto._meta.get_field('categoria').choices}
 
 		for idx, raw_row in df.iterrows():
 			fila = int(idx) + 2
 			row = raw_row.fillna('')
 			try:
-				# helper para obtener valor por etiqueta esperada
-				def val(label):
-					key = _norm(label)
-					orig = col_map.get(key)
-					if orig is None:
-						return ''
-					return row.get(orig, '')
-
-				nombre = str(val('Nombre')).strip()
+				valor = lambda label, *alternates: _get_first_matching_value(row, col_map, label, *alternates)
+				nombre = str(valor('Nombre')).strip()
 				if not nombre:
 					raise ValueError('Nombre obligatorio')
 
-				# Categoria: buscar en choices por label, si no existe usar el texto en mayúsculas (crea categoría implícita)
-				categoria_raw = str(val('Categoria')).strip()
-				categoria_key = _norm(categoria_raw)
+				categoria_raw = str(valor('Categoria')).strip()
+				categoria_key = _normalize_text(categoria_raw)
 				if categoria_raw:
 					categoria = categoria_map.get(categoria_key)
 					if not categoria:
-						# intentar usar valor directo (por si el CSV contiene el código)
 						if categoria_raw.upper() in [c for (c, _) in Producto._meta.get_field('categoria').choices]:
 							categoria = categoria_raw.upper()
 						else:
-							# usar texto recibido como valor, truncando a 30 chars
 							categoria = categoria_raw.upper()[:30]
 				else:
 					categoria = None
@@ -286,29 +312,20 @@ class ImportarProductosExcelView(APIView):
 				if not categoria:
 					raise ValueError(f'Categoria inválida o vacía: {categoria_raw}')
 
-				# Precio
-				precio_raw = val('Precio Unitario')
+				precio_raw = valor('Precio Unitario')
 				try:
 					precio_unitario = Decimal(str(precio_raw)) if precio_raw != '' else Decimal('0')
 				except (InvalidOperation, TypeError):
 					raise ValueError(f'Precio Unitario inválido: {precio_raw}')
 
-				def stock_value(label):
-					raw_value = val(label)
-					try:
-						value = int(raw_value) if raw_value != '' else 0
-					except Exception:
-						raise ValueError(f'{label} inválido: {raw_value}')
-					if value < 0:
-						raise ValueError(f'{label} no puede ser negativo')
-					return value
-
-				stock_almacen = stock_value('Stock Almacen')
-				stock_recepcion = stock_value('Stock Recepcion')
-				stock_refrigeradora = stock_value('Stock Refrigeradora')
-
-				# Stock minimo
-				stock_minimo_raw = val('Stock Minimo')
+				stock_almacen = _parse_stock_value(valor('Stock Almacen', 'Stock Actual'), 'Stock Almacen')
+				stock_recepcion = _parse_stock_value(valor('Stock Recepcion'), 'Stock Recepcion')
+				stock_refrigeradora = _parse_stock_value(valor('Stock Refrigeradora'), 'Stock Refrigeradora')
+				if str(valor('Stock Actual')).strip() and str(valor('Stock Almacen')).strip() == '':
+					stock_almacen = _parse_stock_value(valor('Stock Actual'), 'Stock Actual')
+					stock_recepcion = 0
+					stock_refrigeradora = 0
+				stock_minimo_raw = valor('Stock Minimo')
 				stock_minimo = 0
 				if stock_minimo_raw != '':
 					try:
@@ -316,8 +333,7 @@ class ImportarProductosExcelView(APIView):
 					except Exception:
 						raise ValueError(f'Stock Minimo inválido: {stock_minimo_raw}')
 
-				# Activo
-				activo_raw = str(val('Activo')).strip().lower()
+				activo_raw = str(valor('Activo')).strip().lower()
 				if activo_raw in ['false', 'no', '0', 'n']:
 					activo = False
 				elif activo_raw in ['true', 'si', '1', 's']:
@@ -340,7 +356,6 @@ class ImportarProductosExcelView(APIView):
 				if created_flag:
 					created += 1
 				else:
-					# Actualizar campos relevantes
 					producto.categoria = categoria
 					producto.precio_unitario = precio_unitario
 					producto.stock_almacen = stock_almacen
@@ -374,8 +389,12 @@ class DescargarPlantillaProductosView(APIView):
 			'Stock Recepcion', 'Stock Refrigeradora', 'Stock Minimo', 'Activo'
         ]
 
-        # DataFrame vacío con las columnas en el orden esperado
-        df = pd.DataFrame(columns=required_headers)
+        example_rows = [
+            ['Agua Mineral', 'BEBIDA', 4.50, 15, 0, 0, 5, 'SI'],
+            ['Papas Fritas', 'SNACK', 8.00, 12, 3, 0, 4, 'SI'],
+            ['Gel Antibacterial', 'HIGIENE', 12.00, 0, 5, 0, 2, 'NO'],
+        ]
+        df = pd.DataFrame(example_rows, columns=required_headers)
 
         formato = (formato or '').lower()
         if formato == 'xlsx':

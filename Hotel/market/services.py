@@ -2,7 +2,7 @@ from django.db import transaction
 from core.base_services import BaseService
 from hotel.models import CheckIn
 from market.models import UbicacionStock
-from market.repositories import DetalleVentaRepository, IngresoMercaderiaRepository, ProductoRepository, VentaMarketRepository
+from market.repositories import DetalleVentaRepository, IngresoMercaderiaRepository, ProductoRepository, StockTransferRepository, VentaMarketRepository
 
 # Importaciones de caja activa
 from caja.views import _caja_activa
@@ -34,6 +34,57 @@ class IngresoMercaderiaService(BaseService):
             stock_almacen=producto.stock_almacen + ingreso_data['cantidad'],
         )
         return ingreso
+
+
+class StockTransferService(BaseService):
+    repository_class = StockTransferRepository
+
+    @transaction.atomic
+    def transferir_stock(self, producto_id, origen, destino, cantidad, trabajador, motivo=''):
+        if origen == destino:
+            raise ValueError('El origen y destino no pueden ser los mismos.')
+
+        producto_repo = ProductoRepository()
+        producto = producto_repo.get_by_id(producto_id)
+
+        campos_stock = {
+            UbicacionStock.ALMACEN: 'stock_almacen',
+            UbicacionStock.RECEPCION: 'stock_recepcion',
+            UbicacionStock.REFRIGERADORA: 'stock_refrigeradora',
+        }
+
+        campo_origen = campos_stock[origen]
+        campo_destino = campos_stock[destino]
+
+        stock_origen = getattr(producto, campo_origen)
+
+        if stock_origen < cantidad:
+            raise ValueError(
+                f'Stock insuficiente en {UbicacionStock(origen).label}: '
+                f'tiene {stock_origen}, necesita {cantidad}'
+            )
+
+        # Descontar del origen e incrementar al destino
+        producto_repo.update(
+            producto.id,
+            **{campo_origen: stock_origen - cantidad},
+        )
+        producto_repo.update(
+            producto.id,
+            **{campo_destino: getattr(producto, campo_destino) + cantidad},
+        )
+
+        # Registrar la transferencia en el historial
+        transferencia = self.repository.create(
+            producto=producto,
+            origen=origen,
+            destino=destino,
+            cantidad=cantidad,
+            trabajador=trabajador,
+            motivo=motivo,
+        )
+
+        return transferencia
 
 
 class VentaMarketService(BaseService):

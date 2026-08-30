@@ -11,19 +11,23 @@ export default function ModalSalidaCochera({ espacio, onClose }) {
   const [monto, setMonto] = useState(null)
   const [fetching, setFetching] = useState(false)
   const [metodoPago, setMetodoPago] = useState('EFECTIVO')
+
+  const esHuesped = String(espacio?.vehiculo_actual?.tipo_cliente || '').toUpperCase() === 'HUESPED'
+
   useEffect(() => {
     const registroId = espacio?.vehiculo_actual?.id
     if (!registroId) return
     setFetching(true)
     api.get(`/cochera/vehiculos/${registroId}/salida/`)
       .then(res => {
-        setMonto(res.data.monto_calculado ?? null)
+        const valor = esHuesped ? 0 : (res.data.monto_calculado ?? null)
+        setMonto(valor)
       })
       .catch(err => {
         console.error('Error al obtener monto calculado:', err)
       })
       .finally(() => setFetching(false))
-  }, [espacio])
+  }, [espacio, esHuesped])
 
   const handleConfirmarSalida = async () => {
     // CORREGIDO: Buscamos el ID del registro de forma inteligente
@@ -88,18 +92,20 @@ export default function ModalSalidaCochera({ espacio, onClose }) {
         </p>
 
         <div className="bg-white p-3 rounded border">
-          <p className="text-sm text-slate-600">Monto estimado a cobrar:</p>
-          <p className="text-2xl font-bold text-slate-900">S/ {fetching ? 'Calculando...' : (monto !== null ? Number(monto).toFixed(2) : '0.00')}</p>
+          <p className="text-sm text-slate-600">{esHuesped ? 'Cobro por cortesía:' : 'Monto estimado a cobrar:'}</p>
+          <p className="text-2xl font-bold text-slate-900">{esHuesped ? 'S/ 0.00 (Cortesia)' : `S/ ${fetching ? 'Calculando...' : (monto !== null ? Number(monto).toFixed(2) : '0.00')}`}</p>
         </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Método de Pago</label>
-              <select value={metodoPago} onChange={(e) => setMetodoPago(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2">
-                <option value="EFECTIVO">Efectivo</option>
-                <option value="YAPE">Yape / Plin</option>
-                <option value="TARJETA">Tarjeta</option>
-              </select>
-            </div>
+        {!esHuesped && (
+          <div>
+            <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Método de Pago</label>
+            <select value={metodoPago} onChange={(e) => setMetodoPago(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2">
+              <option value="EFECTIVO">Efectivo</option>
+              <option value="YAPE">Yape / Plin</option>
+              <option value="TARJETA">Tarjeta</option>
+            </select>
+          </div>
+        )}
         <div className="flex gap-2 justify-end pt-4 border-t border-slate-100">
           <Button type="button" variant="ghost" onClick={onClose} disabled={loading}>
             Cancelar

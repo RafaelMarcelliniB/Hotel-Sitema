@@ -1,3 +1,4 @@
-Nombre,Categoria,Precio Unitario,Stock Actual,Stock Minimo,Tipo Registro,Activo
-Ejemplo Snack,Snack,3.50,10,2,Stock,SI
-Ejemplo Bebida,Bebida,2.00,20,5,Stock,SI
+Nombre,Categoria,Precio Unitario,Stock Almacen,Stock Recepcion,Stock Refrigeradora,Stock Minimo,Activo
+Agua Mineral,BEBIDA,4.50,15,0,0,5,SI
+Papas Fritas,SNACK,8.00,12,3,0,4,SI
+Gel Antibacterial,HIGIENE,12.00,0,5,0,2,NO

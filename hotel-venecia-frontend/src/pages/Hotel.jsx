@@ -87,6 +87,7 @@ export default function Hotel() {
   const handleCloseModals = () => {
     setShowCheckIn(false);
     setShowCheckOut(false);
+    setShowProcesarReserva(false);
     setSelectedHab(null);
     setCheckInInitialData(null)
   };

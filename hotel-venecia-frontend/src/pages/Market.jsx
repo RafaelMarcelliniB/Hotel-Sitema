@@ -35,10 +35,21 @@ const STOCK_FIELDS = {
 }
 
 function stockPorUbicacion(producto, ubicacion) {
-  if (ubicacion === 'TODOS') {
-    return producto.stock_total ?? ((producto.stock_almacen ?? 0) + (producto.stock_recepcion ?? 0) + (producto.stock_refrigeradora ?? 0))
+  const toNumber = (value) => {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : 0
   }
-  return producto[STOCK_FIELDS[ubicacion]] ?? 0
+
+  const stockAlmacen = toNumber(producto.stock_almacen)
+  const stockRecepcion = toNumber(producto.stock_recepcion)
+  const stockRefrigeradora = toNumber(producto.stock_refrigeradora)
+  const stockTotalReal = stockAlmacen + stockRecepcion + stockRefrigeradora
+
+  if (ubicacion === 'TODOS') {
+    return stockTotalReal
+  }
+
+  return toNumber(producto[STOCK_FIELDS[ubicacion]])
 }
 
 function ubicacionesDisponibles(producto) {
@@ -107,7 +118,7 @@ function TemplatesDropdown() {
 
 export default function Market() {
   const navigate = useNavigate()
-    const { productos, isLoading, procesarVenta, importarProductos, previewProductos } = useProductos()
+    const { productos, isLoading, procesarVenta, importarProductos, previewProductos, transferirStock, isTransferring, refetchProductos } = useProductos()
     const { habitaciones } = useHabitaciones()
     const { cajaActiva } = useCajaBlocked()
     const user = useAuthStore(state => state.user)
@@ -118,9 +129,17 @@ export default function Market() {
     const [carrito, setCarrito] = useState([])
     const [showCajaBlocked, setShowCajaBlocked] = useState(false)
     const [showImportModal, setShowImportModal] = useState(false)
+    const [showTransferModal, setShowTransferModal] = useState(false)
     const [selectedFile, setSelectedFile] = useState(null)
     const [previewRows, setPreviewRows] = useState([])
     const [importing, setImporting] = useState(false)
+    const [transferForm, setTransferForm] = useState({
+      productoId: '',
+      origen: 'ALMACEN',
+      destino: 'RECEPCION',
+      cantidad: '1',
+      motivo: 'Transferencia de stock'
+    })
 
     const [metodoPago, setMetodoPago] = useState('EFECTIVO')
     const [habitacionSeleccionada, setHabitacionSeleccionada] = useState(null)
@@ -152,6 +171,56 @@ export default function Market() {
     }
 
     const total = carrito.reduce((acc, item) => acc + (item.precio_unitario * item.cantidad), 0)
+
+    const productoTransferencia = productos.find(p => Number(p.id) === Number(transferForm.productoId)) || null
+    const origenTransferOptions = productoTransferencia
+      ? UBICACIONES.slice(1).filter(u => (productoTransferencia[STOCK_FIELDS[u.value]] ?? 0) > 0)
+      : UBICACIONES.slice(1)
+    const destinoTransferOptions = UBICACIONES.slice(1).filter(u => u.value !== transferForm.origen)
+
+    const handleTransferStock = async () => {
+      if (!transferForm.productoId) {
+        alert('Selecciona un producto para transferir')
+        return
+      }
+      if (transferForm.origen === transferForm.destino) {
+        alert('El origen y destino deben ser distintos')
+        return
+      }
+      const cantidad = Number(transferForm.cantidad)
+      if (!Number.isFinite(cantidad) || cantidad <= 0) {
+        alert('La cantidad debe ser mayor que 0')
+        return
+      }
+      const stockOrigen = Number(productoTransferencia?.[STOCK_FIELDS[transferForm.origen]] ?? 0)
+      if (cantidad > stockOrigen) {
+        alert(`No hay suficiente stock en ${UBICACIONES.find(u => u.value === transferForm.origen)?.label}. Disponible: ${stockOrigen}`)
+        return
+      }
+
+      try {
+        await transferirStock({
+          productoId: transferForm.productoId,
+          origen: transferForm.origen,
+          destino: transferForm.destino,
+          cantidad,
+          motivo: transferForm.motivo || 'Transferencia de stock'
+        })
+        await refetchProductos()
+        setShowTransferModal(false)
+        setTransferForm({
+          productoId: '',
+          origen: 'ALMACEN',
+          destino: 'RECEPCION',
+          cantidad: '1',
+          motivo: 'Transferencia de stock',
+        })
+        alert('✅ Transferencia registrada correctamente')
+      } catch (err) {
+        const mensajeError = err.response?.data?.detail || err.response?.data?.message || 'Error al transferir stock'
+        alert(`⚠️ ${mensajeError}`)
+      }
+    }
 
     const incrementarCantidad = (productoId, ubicacion, stock_maximo) => {
       setCarrito(prev => prev.map(item => item.id === productoId && item.ubicacion_stock === ubicacion && item.cantidad < stock_maximo ? { ...item, cantidad: item.cantidad + 1 } : item))
@@ -221,7 +290,8 @@ export default function Market() {
                   <Input placeholder="Buscar producto..." value={filtro} onChange={(e) => setFiltro(e.target.value)} />
                 </div>
                 {(user?.rol?.toLowerCase() === 'admin' || user?.rol?.toLowerCase() === 'administrador') && (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={async () => { await refetchProductos(); setShowTransferModal(true) }}>🔁 Transferir stock</Button>
                     <Button className="bg-green-600" onClick={() => setShowImportModal(true)}>📥 Cargar Productos (Excel/CSV)</Button>
 
                     {/* Dropdown Plantilla */}
@@ -269,6 +339,78 @@ export default function Market() {
                 )
               })}
             </div>
+
+            {showTransferModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+                <div className="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <h3 className="text-lg font-bold text-slate-900">Transferir stock entre ubicaciones</h3>
+                    <button className="rounded-full px-3 py-1 text-slate-500 hover:bg-slate-100" onClick={() => setShowTransferModal(false)} type="button">×</button>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div>
+                      <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-500">Producto</label>
+                      <select value={transferForm.productoId} onChange={(e) => setTransferForm(prev => ({ ...prev, productoId: e.target.value }))} className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-sm text-slate-700">
+                        <option value="">Selecciona un producto</option>
+                        {productos.map(p => (
+                          <option key={p.id} value={p.id}>{p.nombre}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {productoTransferencia && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-500">Origen</label>
+                          <select value={transferForm.origen} onChange={(e) => setTransferForm(prev => ({ ...prev, origen: e.target.value, destino: e.target.value === 'ALMACEN' ? 'RECEPCION' : 'ALMACEN' }))} className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-sm text-slate-700">
+                            {origenTransferOptions.map(u => (
+                              <option key={u.value} value={u.value}>{u.label}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-500">Destino</label>
+                          <select value={transferForm.destino} onChange={(e) => setTransferForm(prev => ({ ...prev, destino: e.target.value }))} className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-sm text-slate-700">
+                            {destinoTransferOptions.map(u => (
+                              <option key={u.value} value={u.value}>{u.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    {productoTransferencia && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-500">Cantidad</label>
+                          <input type="number" min="1" max={productoTransferencia[STOCK_FIELDS[transferForm.origen]] ?? 1} value={transferForm.cantidad} onChange={(e) => setTransferForm(prev => ({ ...prev, cantidad: e.target.value }))} className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-sm text-slate-700" />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-500">Stock disponible</label>
+                          <div className="flex h-[46px] items-center rounded-lg border border-slate-200 bg-slate-100 px-3 text-sm font-semibold text-slate-700">
+                            {productoTransferencia[STOCK_FIELDS[transferForm.origen]] ?? 0} unidades
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-500">Motivo</label>
+                      <input value={transferForm.motivo} onChange={(e) => setTransferForm(prev => ({ ...prev, motivo: e.target.value }))} className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-sm text-slate-700" placeholder="Ej. Reposición de recepción" />
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-2">
+                      <button type="button" className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700" onClick={() => setShowTransferModal(false)}>Cancelar</button>
+                      <button type="button" disabled={isTransferring} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60" onClick={handleTransferStock}>
+                        {isTransferring ? 'Transferiendo...' : 'Confirmar traslado'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {showImportModal && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
@@ -352,10 +494,10 @@ export default function Market() {
           </div>
 
           <div className="space-y-4">
-            <Card className="h-full flex flex-col justify-between">
+            <Card className="flex flex-col">
               <div>
                 <h3 className="text-lg font-bold mb-4">Resumen de Venta</h3>
-                <div className="space-y-3 overflow-y-auto max-h-[300px] pr-1">
+                <div className="space-y-3 min-h-[260px] pr-1">
                   {carrito.map(item => (
                     <div key={`${item.id}-${item.ubicacion_stock}`} className="flex justify-between items-center text-sm border-b pb-2 group">
                       <div className="flex-1">

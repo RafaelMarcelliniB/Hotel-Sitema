@@ -3,6 +3,7 @@ import { useCrearReserva } from '../../hooks/useReservas'
 
 export default function ModalReserva({ habitacion, onClose, onSuccess }) {
   const [nombre, setNombre] = useState('')
+  const [apellido, setApellido] = useState('')
   const [dni, setDni] = useState('')
   const [telefono, setTelefono] = useState('')
   const [fechaLlegada, setFechaLlegada] = useState(() => new Date().toISOString().slice(0, 10))
@@ -14,8 +15,15 @@ export default function ModalReserva({ habitacion, onClose, onSuccess }) {
   const handleSubmit = async (e) => {
     e.preventDefault()
     try {
+      const nombreCompleto = `${nombre} ${apellido}`.trim()
       await crear.mutateAsync({
-        huesped: { nombre: nombre, apellido: '', dni_pasaporte: dni, telefono },
+        huesped: {
+          nombre,
+          apellido,
+          dni_pasaporte: dni,
+          telefono,
+          nombre_completo: nombreCompleto,
+        },
         habitacion_preferida: habitacion.id,
         fecha_llegada_estimada: fechaLlegada,
         hora_llegada_estimada: horaLlegada,
@@ -46,9 +54,15 @@ export default function ModalReserva({ habitacion, onClose, onSuccess }) {
       <div className="relative z-50 w-full max-w-md bg-white p-6 rounded-lg">
         <h3 className="text-lg font-bold mb-4">Reservar Habitación #{habitacion.numero}</h3>
         <form onSubmit={handleSubmit} className="space-y-3">
-          <div>
-            <label className="block text-sm">Nombre completo</label>
-            <input value={nombre} onChange={e => setNombre(e.target.value)} required className="w-full border px-3 py-2 rounded" />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm">Nombre</label>
+              <input value={nombre} onChange={e => setNombre(e.target.value)} required className="w-full border px-3 py-2 rounded" />
+            </div>
+            <div>
+              <label className="block text-sm">Apellidos</label>
+              <input value={apellido} onChange={e => setApellido(e.target.value)} required className="w-full border px-3 py-2 rounded" />
+            </div>
           </div>
           <div>
             <label className="block text-sm">DNI / Documento</label>

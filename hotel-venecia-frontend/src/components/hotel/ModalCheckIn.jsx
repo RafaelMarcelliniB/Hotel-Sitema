@@ -30,10 +30,34 @@ export default function ModalCheckIn({ habitacion, onClose, onSuccess, initialDa
   });
 
   // Prefill with initialData when provided (e.g., coming from a reserva)
+  const splitNombreCompleto = (valor) => {
+    const raw = String(valor || '').trim()
+    if (!raw) return { nombre: '', apellido: '' }
+    const partes = raw.split(/\s+/)
+    if (partes.length === 1) return { nombre: partes[0], apellido: '' }
+    return {
+      nombre: partes[0],
+      apellido: partes.slice(1).join(' '),
+    }
+  }
+
   useEffect(() => {
     if (!initialData) return
+    const nombreRaw = initialData?.huesped?.nombre || initialData?.cliente_nombre || ''
+    const { nombre, apellido } = splitNombreCompleto(nombreRaw)
     if (initialData.huesped) {
-      setHuesped(prev => ({ ...prev, ...initialData.huesped }))
+      setHuesped(prev => ({
+        ...prev,
+        ...initialData.huesped,
+        nombre: initialData.huesped.nombre || nombre || prev.nombre || '',
+        apellido: initialData.huesped.apellido || apellido || prev.apellido || '',
+      }))
+    } else {
+      setHuesped(prev => ({
+        ...prev,
+        nombre: nombre || prev.nombre || '',
+        apellido: apellido || prev.apellido || '',
+      }))
     }
     // Asegurar mapeo flexible y determinista del teléfono desde la reserva
     const celularReal = (

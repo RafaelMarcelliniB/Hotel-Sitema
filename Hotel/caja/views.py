@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from caja.models import Caja, MovimientoCaja
-from hotel.models import Habitacion
+from hotel.models import Habitacion, CheckIn
 from market.models import DetalleVenta
 from caja.serializers import (
     CajaAperturaSerializer,
@@ -598,6 +598,41 @@ class ReportesVentasExcelView(APIView):
         except Exception:
             return None
 
+    def _get_huesped_data(self, movimiento):
+        data = {'dni': '', 'nombre_huesped': '', 'apellido_huesped': ''}
+        if not movimiento:
+            return data
+
+        try:
+            for haystack in (movimiento.referencia, movimiento.descripcion):
+                if not haystack:
+                    continue
+                match = re.search(r'Check(?:-\s*|\s+)?In\s*(?:#|No\.?\s*)?(\d+)', haystack, re.IGNORECASE)
+                if match:
+                    try:
+                        checkin = CheckIn.objects.select_related('huesped').get(pk=int(match.group(1)))
+                        data['dni'] = getattr(checkin.huesped, 'dni_pasaporte', '') or ''
+                        data['nombre_huesped'] = getattr(checkin.huesped, 'nombre', '') or ''
+                        data['apellido_huesped'] = getattr(checkin.huesped, 'apellido', '') or ''
+                        return data
+                    except CheckIn.DoesNotExist:
+                        pass
+
+            descripcion = movimiento.descripcion or ''
+            match_huesped = re.search(r'Huésped\s*:\s*([^\-]+)', descripcion, re.IGNORECASE)
+            if match_huesped:
+                nombre_completo = match_huesped.group(1).strip()
+                partes = nombre_completo.split()
+                if len(partes) >= 2:
+                    data['nombre_huesped'] = partes[0]
+                    data['apellido_huesped'] = ' '.join(partes[1:])
+                elif partes:
+                    data['nombre_huesped'] = partes[0]
+
+            return data
+        except Exception:
+            return data
+
     def _build_date_range(self, request):
         periodo = request.query_params.get('periodo', '').strip().lower()
         fecha_inicio = request.query_params.get('fecha_inicio')
@@ -722,12 +757,13 @@ class ReportesVentasExcelView(APIView):
             ws = wb.active
             ws.title = 'Reporte Trabajador'
 
-            headers = ['Fecha / Hora', 'Trabajador', 'Turno', 'Módulo', 'Tipo', 'Pago', 'Monto', 'Referencia', 'Descripción']
+            headers = ['Fecha / Hora', 'Trabajador', 'Turno', 'Módulo', 'Tipo', 'Pago', 'Monto', 'Referencia', 'DNI', 'Nombre Huésped', 'Apellido Huésped', 'Descripción']
             for col_idx, h in enumerate(headers, start=1):
                 cell = ws.cell(row=1, column=col_idx, value=h)
                 cell.font = Font(bold=True)
 
             for idx, mov in enumerate(movimientos, start=2):
+                huesped_data = self._get_huesped_data(mov)
                 ws.cell(row=idx, column=1, value=mov.fecha_hora.strftime('%Y-%m-%d %H:%M:%S'))
                 ws.cell(row=idx, column=2, value=str(mov.trabajador))
                 ws.cell(row=idx, column=3, value=mov.turno)
@@ -736,13 +772,16 @@ class ReportesVentasExcelView(APIView):
                 ws.cell(row=idx, column=6, value=mov.tipo_caja)
                 ws.cell(row=idx, column=7, value=float(mov.monto))
                 ws.cell(row=idx, column=8, value=mov.referencia)
-                ws.cell(row=idx, column=9, value=mov.descripcion)
+                ws.cell(row=idx, column=9, value=huesped_data['dni'])
+                ws.cell(row=idx, column=10, value=huesped_data['nombre_huesped'])
+                ws.cell(row=idx, column=11, value=huesped_data['apellido_huesped'])
+                ws.cell(row=idx, column=12, value=mov.descripcion)
 
             # Totales
             total = movimientos.filter(tipo=MovimientoCaja.Tipo.INGRESO).aggregate(total=Sum('monto')).get('total') or 0
             total_row = movimientos.count() + 3
             ws.cell(row=total_row, column=8, value='Total').font = Font(bold=True)
-            ws.cell(row=total_row, column=9, value=float(total)).font = Font(bold=True)
+            ws.cell(row=total_row, column=12, value=float(total)).font = Font(bold=True)
 
             self._auto_adjust_columns(ws)
 
