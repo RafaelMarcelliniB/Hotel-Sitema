@@ -55,9 +55,13 @@ class EspacioCocheraViewSet(viewsets.ModelViewSet):
                 espacio_data['vehiculo_actual'] = {
                     'id': registro.id,
                     'placa': registro.placa,
+					'tipo_vehiculo': registro.tipo_vehiculo,
                     'tipo_cliente': registro.tipo_cliente,
+					'habitacion': registro.checkin_vinculado.habitacion.numero if registro.checkin_vinculado else None,
                     'hora_ingreso': registro.hora_entrada.strftime('%H:%M') if registro.hora_entrada else None,
                     'fecha_ingreso': registro.fecha_entrada.strftime('%Y-%m-%d') if registro.fecha_entrada else None,
+					'hora_salida_estimada': registro.hora_salida_estimada,
+					'observaciones': registro.observaciones,
                 }
                 # Mantener compatibilidad con frontend anterior
                 espacio_data['placa'] = registro.placa

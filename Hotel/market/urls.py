@@ -12,8 +12,10 @@ from market.views import (
 
 urlpatterns = [
 	path('productos/', ProductoViewSet.as_view({'get': 'list', 'post': 'create'}), name='productos-list'),
-	path('productos/<int:pk>/', ProductoViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='productos-detail'),
 	path('productos/bajo-stock/', ProductoViewSet.as_view({'get': 'bajo_stock'}), name='productos-bajo-stock'),
+	path('productos/<int:pk>/transferir/', ProductoViewSet.as_view({'post': 'transferir_stock'}), name='productos-transferir'),
+	path('productos/<int:pk>/transferencias/', ProductoViewSet.as_view({'get': 'transferencias_historial'}), name='productos-transferencias'),
+	path('productos/<int:pk>/', ProductoViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='productos-detail'),
 	path('ingreso-mercaderia/', IngresoMercaderiaViewSet.as_view({'get': 'list', 'post': 'create'}), name='ingreso-mercaderia'),
 	path('ingreso-mercaderia/<int:pk>/', IngresoMercaderiaViewSet.as_view({'get': 'retrieve', 'delete': 'destroy'}), name='ingreso-mercaderia-detail'),
 	path('ventas/', VentaMarketViewSet.as_view({'get': 'list', 'post': 'create'}), name='ventas-list'),

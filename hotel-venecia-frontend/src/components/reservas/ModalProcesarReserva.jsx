@@ -1,29 +1,47 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { useReservasPorHabitacion } from '../../hooks/useReservas'
 
-export default function ModalProcesarReserva({ habitacion, isOpen, onClose, onSuccess, onOpenCheckIn }) {
+const splitNombreCompleto = (valor) => {
+  const raw = String(valor || '').trim()
+  if (!raw) return { nombre: '', apellido: '' }
+  const partes = raw.split(/\s+/)
+  if (partes.length === 1) return { nombre: partes[0], apellido: '' }
+  return {
+    nombre: partes[0],
+    apellido: partes.slice(1).join(' '),
+  }
+}
+
+export default function ModalProcesarReserva({ habitacion, isOpen, onClose, onOpenCheckIn }) {
   // Extraer el id de la habitación de forma defensiva: puede venir como objeto o como campos distintos
   const habitacionId = habitacion ? (habitacion.id ?? habitacion.habitacion_id ?? habitacion.numero) : null
-  const { data: reservas = [], isLoading, isError, refetch } = useReservasPorHabitacion(habitacionId)
+  const { data: reservas = [], isLoading, isError } = useReservasPorHabitacion(habitacionId)
   const [processingId, setProcessingId] = useState(null)
 
   if (!isOpen) return null
 
   const handleProcesar = (reserva) => {
     if (!window.confirm(`Abrir formulario de Check-in para ${reserva.huesped?.nombre || 'Huésped'} en Hab ${habitacion.numero}?`)) return
-    // Preparar datos para abrir el modal principal de Check-in (no ejecutar la API aquí)
+    setProcessingId(reserva.id)
+    const nombreBase = reserva.huesped?.nombre || reserva.huesped || ''
+    const { nombre, apellido } = splitNombreCompleto(nombreBase)
     const initialPayload = {
       // incluir el id de la reserva para que el modal de CheckIn pueda enviar `reserva_id`
       id: reserva.id,
       habitacion: habitacion,
-      cliente_nombre: reserva.huesped?.nombre || reserva.huesped || '',
-      cliente_apellido: reserva.huesped?.apellido || '',
+      cliente_nombre: nombreBase,
+      cliente_apellido: reserva.huesped?.apellido || apellido || '',
       cliente_dni: reserva.huesped?.dni_pasaporte || reserva.dni || reserva.documento || '',
       // Mapear el teléfono siguiendo la estructura flexible solicitada
       cliente_telefono: reserva.cliente_telefono || reserva.telefono || reserva.celular || (reserva.cliente && reserva.cliente.celular) || (reserva.cliente && reserva.cliente.telefono) || '',
-      monto_adelanto: reserva.monto_pagado ?? reserva.precio_pagado ?? 20.00,
-      garantia: 20.00,
-      habitacion_id: habitacion?.id ?? habitacion?.habitacion_id
+      monto_adelanto: reserva.monto_adelanto ?? reserva.monto_garantia ?? reserva.monto_pagado ?? 20.00,
+      garantia: reserva.monto_garantia ?? 20.00,
+      tipo_pago: reserva.tipo_pago_adelanto || 'EFECTIVO',
+      habitacion_id: habitacion?.id ?? habitacion?.habitacion_id,
+      huesped: {
+        nombre,
+        apellido: reserva.huesped?.apellido || apellido || '',
+      }
     }
 
     // Llamar al handler proporcionado por la página principal para abrir el modal de Check-in
@@ -33,6 +51,7 @@ export default function ModalProcesarReserva({ habitacion, isOpen, onClose, onSu
 
     // Cerrar este modal
     onClose && onClose()
+    setProcessingId(null)
   }
 
   return (
@@ -48,7 +67,31 @@ export default function ModalProcesarReserva({ habitacion, isOpen, onClose, onSu
         {isError && <div className="p-4 text-red-500">No se pudo cargar las reservas para esta habitación.</div>}
 
         {!isLoading && reservas.length === 0 && (
-          <div className="p-6 text-center text-slate-500">No hay reservas asociadas a esta habitación.</div>
+          <div className="space-y-4 p-6 text-center">
+            <div className="text-slate-500">No hay reservas asociadas a esta habitación.</div>
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof onOpenCheckIn === 'function') {
+                  onOpenCheckIn({
+                    habitacion,
+                    cliente_nombre: '',
+                    cliente_apellido: '',
+                    cliente_dni: '',
+                    cliente_telefono: '',
+                    monto_adelanto: 0,
+                    garantia: 0,
+                    tipo_pago: 'EFECTIVO',
+                    habitacion_id: habitacion?.id ?? habitacion?.habitacion_id,
+                  })
+                }
+                onClose && onClose()
+              }}
+              className="px-4 py-2 rounded bg-emerald-600 text-white font-medium"
+            >
+              Completar Check-in directo
+            </button>
+          </div>
         )}
 
         {!isLoading && reservas.length > 0 && (

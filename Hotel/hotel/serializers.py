@@ -86,7 +86,11 @@ class CheckInSerializer(BaseSerializer):
             sub_market = Decimal(str(sub_market)) if sub_market is not None else Decimal('0.00')
             
             # 3. Cochera (Controlamos estrictamente si no hay registros vinculados aún)
-            vehiculos_query = RegistroVehiculo.objects.filter(checkin_vinculado=obj)
+            vehiculos_query = RegistroVehiculo.objects.filter(
+                checkin_vinculado=obj,
+                fecha_salida__isnull=True,
+                espacio__estado='OCUPADO',
+            )
             if vehiculos_query.exists():
                 sub_cochera = vehiculos_query.aggregate(total=Sum('monto_total'))['total']
                 sub_cochera = Decimal(str(sub_cochera)) if sub_cochera is not None else Decimal('0.00')
@@ -124,17 +128,30 @@ class CargoAdicionalSerializer(BaseSerializer):
 
 
 class ReservaSerializer(BaseSerializer):
+    class Meta:
+        model = Reserva
+        fields = [
+            'id', 'habitacion_preferida', 'trabajador',
+            'fecha_llegada_estimada', 'hora_llegada_estimada',
+            'monto_adelanto', 'tipo_pago_adelanto', 'monto_garantia',
+            'estado', 'notas', 'alerta_color', 'created_at', 'updated_at', 'huesped'
+        ]
+
     # Aceptamos un objeto libre desde el frontend y lo procesamos en create()
     huesped = serializers.DictField(write_only=True, required=False)
-    # Representación de salida del huésped (anidada)
-    huesped_obj = HuespedSerializer(source='huesped', read_only=True)
     # No exigir trabajador en el payload; se inyecta desde la vista con request.user
     trabajador = serializers.PrimaryKeyRelatedField(read_only=True)
     habitacion_preferida = serializers.PrimaryKeyRelatedField(queryset=Habitacion.objects.all())
 
-    class Meta:
-        model = Reserva
-        fields = '__all__'
+    @staticmethod
+    def _split_nombre_completo(value):
+        raw = ' '.join(str(value or '').split())
+        if not raw:
+            return '', ''
+        partes = raw.split()
+        if len(partes) == 1:
+            return partes[0], ''
+        return partes[0], ' '.join(partes[1:])
 
     def create(self, validated_data):
         # Manejar creación o asociación de huesped anidado
@@ -152,14 +169,14 @@ class ReservaSerializer(BaseSerializer):
                 huesped = Huesped.objects.filter(dni_pasaporte=str(dni)).first()
 
             if not huesped:
-                # Soportar nombre completo como una sola cadena
-                nombre = huesped_data.get('nombre') or ''
-                apellido = huesped_data.get('apellido') or ''
-                nombre_completo = huesped_data.get('nombre_completo') or huesped_data.get('nombreCompleto')
-                if nombre_completo and not (nombre or apellido):
-                    parts = nombre_completo.strip().split(None, 1)
-                    nombre = parts[0]
-                    apellido = parts[1] if len(parts) > 1 else ''
+                nombre = (huesped_data.get('nombre') or '').strip()
+                apellido = (huesped_data.get('apellido') or '').strip()
+                nombre_completo = (huesped_data.get('nombre_completo') or huesped_data.get('nombreCompleto') or '').strip()
+
+                if nombre and not apellido:
+                    nombre, apellido = self._split_nombre_completo(nombre)
+                elif nombre_completo and not (nombre or apellido):
+                    nombre, apellido = self._split_nombre_completo(nombre_completo)
 
                 huesped = Huesped.objects.create(
                     nombre=nombre,
@@ -180,9 +197,16 @@ class ReservaSerializer(BaseSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        # Mostrar el huésped anidado bajo la clave 'huesped' para compatibilidad con frontend
         if 'huesped_obj' in data:
             data['huesped'] = data.pop('huesped_obj')
+        elif hasattr(instance, 'huesped'):
+            data['huesped'] = {
+                'id': instance.huesped_id,
+                'nombre': instance.huesped.nombre,
+                'apellido': instance.huesped.apellido,
+                'dni_pasaporte': instance.huesped.dni_pasaporte,
+                'telefono': instance.huesped.telefono,
+            }
         return data
 
 

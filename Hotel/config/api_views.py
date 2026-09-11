@@ -73,7 +73,11 @@ class DashboardView(APIView):
         reservas_activas_count = reservas_qs.count()
         monto_custodia = reservas_qs.aggregate(total=Sum('monto_garantia')).get('total') or Decimal('0')
         reservas_vencidas_count = Reserva.objects.filter(estado=Reserva.Estado.VENCIDA_REEMBOLSO).count()
-        productos_stock_bajo = Producto.objects.filter(activo=True, stock_actual__lte=F('stock_minimo')).order_by('nombre')
+        productos_stock_bajo = Producto.objects.filter(
+            activo=True,
+        ).annotate(
+            stock_total_calculado=F('stock_almacen') + F('stock_recepcion') + F('stock_refrigeradora'),
+        ).filter(stock_total_calculado__lte=F('stock_minimo')).order_by('nombre')
         
         # Aplicar filtrado de movimientos según el rol del usuario
         movimientos_hoy = self._obtener_movimientos_filtrados(request, hoy)
@@ -154,7 +158,7 @@ class DashboardView(APIView):
                 {
                     'id': producto.id,
                     'nombre': producto.nombre,
-                    'stock_actual': producto.stock_actual,
+					'stock_total': producto.stock_total,
                     'stock_minimo': producto.stock_minimo,
                     'categoria': producto.categoria,
                 }

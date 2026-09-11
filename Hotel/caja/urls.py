@@ -10,15 +10,21 @@ from caja.views import (
 	MovimientoCajaPagarDeudaView,
 	MovimientoCajaViewSet,
     CajaReporteExcelView,
+	CajaAperturaSugeridaView,
+	CajaEgresoView,
+	CajaAjusteTarifaView,
 )
 
 urlpatterns = [
 	path('cajas/', CajaListView.as_view(), name='cajas-list'),
 	path('apertura/', CajaAperturaView.as_view(), name='caja-apertura'),
+	path('apertura/sugerida/', CajaAperturaSugeridaView.as_view(), name='caja-apertura-sugerida'),
 	path('cierre/', CajaCierreView.as_view(), name='caja-cierre'),
 	path('resumen/', CajaResumenView.as_view(), name='caja-resumen'),
 	path('dashboard/', DashboardStatsView.as_view(), name='caja-dashboard'),
 	path('movimientos/', MovimientoCajaViewSet.as_view({'get': 'list', 'post': 'create'}), name='movimientos-list'),
+	path('egresos/', CajaEgresoView.as_view(), name='caja-egresos'),
+	path('ajustes-tarifa/', CajaAjusteTarifaView.as_view(), name='caja-ajustes-tarifa'),
 	path('movimientos/<int:pk>/', MovimientoCajaViewSet.as_view({'get': 'retrieve', 'delete': 'destroy'}), name='movimientos-detail'),
 	path('movimientos/<int:movimiento_id>/pagar-deuda/', MovimientoCajaPagarDeudaView.as_view(), name='movimientos-pagar-deuda'),
 	path('health/', HealthCajaView.as_view(), name='caja-health'),

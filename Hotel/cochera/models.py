@@ -46,6 +46,8 @@ class RegistroVehiculo(BaseModel):
 	hora_entrada = models.TimeField()
 	fecha_salida = models.DateField(null=True, blank=True)
 	hora_salida = models.TimeField(null=True, blank=True)
+	hora_salida_estimada = models.CharField(max_length=50, blank=True)
+	observaciones = models.TextField(blank=True)
 	tarifa_tipo = models.CharField(max_length=20, choices=TarifaTipo.choices)
 	monto_total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 	espacio = models.ForeignKey(EspacioCochera, on_delete=models.PROTECT, related_name='vehiculos')

@@ -242,7 +242,13 @@ class CheckInService(BaseService):
         
         # 🚗 CÁLCULO EN TIEMPO REAL DE COCHERA SIN INCOHERENCIA DE TIPOS:
         subtotal_cochera = Decimal('0')
-        for vehiculo in checkin.vehiculos.all():
+        for vehiculo in checkin.vehiculos.filter(
+            fecha_salida__isnull=True,
+            espacio__estado='OCUPADO',
+        ):
+            if cochera_service._es_cortesia_huesped(vehiculo):
+                subtotal_cochera += Decimal('0')
+                continue
             if vehiculo.fecha_salida is not None and vehiculo.monto_total is not None:
                 subtotal_cochera += Decimal(str(vehiculo.monto_total))
             else:

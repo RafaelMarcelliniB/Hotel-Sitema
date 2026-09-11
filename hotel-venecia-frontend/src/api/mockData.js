@@ -60,9 +60,9 @@ export const habitaciones = [
 ]
 
 export const productos = [
-  { id: 1, nombre: 'Agua', categoria: 'BEBIDA', stock_actual: 42, stock_minimo: 10, precio_unitario: 3.5, activo: true },
-  { id: 2, nombre: 'Papas', categoria: 'SNACK', stock_actual: 18, stock_minimo: 8, precio_unitario: 5.0, activo: true },
-  { id: 3, nombre: 'Preservativo', categoria: 'PRESERVATIVO', stock_actual: 9, stock_minimo: 12, precio_unitario: 8.5, activo: true },
+  { id: 1, nombre: 'Agua', categoria: 'BEBIDA', stock_almacen: 30, stock_recepcion: 8, stock_refrigeradora: 4, stock_total: 42, stock_minimo: 10, precio_unitario: 3.5, activo: true },
+  { id: 2, nombre: 'Papas', categoria: 'SNACK', stock_almacen: 18, stock_recepcion: 0, stock_refrigeradora: 0, stock_total: 18, stock_minimo: 8, precio_unitario: 5.0, activo: true },
+  { id: 3, nombre: 'Preservativo', categoria: 'PRESERVATIVO', stock_almacen: 9, stock_recepcion: 0, stock_refrigeradora: 0, stock_total: 9, stock_minimo: 12, precio_unitario: 8.5, activo: true },
 ]
 
 export const espacios = [

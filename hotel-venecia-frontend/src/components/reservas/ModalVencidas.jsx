@@ -1,13 +1,33 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
+import { procesarDevolucionReserva, retenerGarantiaReserva } from '../../api/reservaApi'
 
-export default function ModalVencidas({ isOpen, onClose, reservas = [], loading = false, error = null }) {
-  if (!isOpen) return null
-
+export default function ModalVencidas({ isOpen, onClose, reservas = [], loading = false, error = null, onProcessed }) {
   const [expandedId, setExpandedId] = useState(null)
+  const [processingId, setProcessingId] = useState(null)
+
+  if (!isOpen) return null
 
   const formatPhone = (tel) => {
     if (!tel) return ''
     return tel.replace(/[^0-9]/g, '')
+  }
+
+  const handleAction = async (reserva, action) => {
+    const message = action === 'refund'
+      ? '¿Confirmar devolución de la garantía en caja?'
+      : '¿Retener la garantía como penalidad y liberar la habitación?'
+    if (!window.confirm(message)) return
+    setProcessingId(reserva.id)
+    try {
+      if (action === 'refund') await procesarDevolucionReserva(reserva.id)
+      else await retenerGarantiaReserva(reserva.id)
+      setExpandedId(null)
+      onProcessed?.()
+    } catch (err) {
+      alert(err?.response?.data?.detail || 'No se pudo procesar la garantía.')
+    } finally {
+      setProcessingId(null)
+    }
   }
 
   return (
@@ -77,6 +97,10 @@ export default function ModalVencidas({ isOpen, onClose, reservas = [], loading 
                           <div className="text-xs text-slate-500">Monto garantía</div>
                           <div className="font-medium">S/ {Number(r.monto_garantia || 0).toFixed(2)}</div>
                         </div>
+                      </div>
+                      <div className="mt-4 flex flex-wrap justify-end gap-2 border-t pt-3">
+                        <button disabled={processingId === r.id} onClick={() => handleAction(r, 'refund')} className="rounded bg-emerald-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">Procesar Devolución</button>
+                        <button disabled={processingId === r.id} onClick={() => handleAction(r, 'penalty')} className="rounded bg-rose-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">Retener Garantía / Penalidad</button>
                       </div>
                     </div>
                   )}

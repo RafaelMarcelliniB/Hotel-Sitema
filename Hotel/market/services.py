@@ -1,7 +1,8 @@
 from django.db import transaction
 from core.base_services import BaseService
 from hotel.models import CheckIn
-from market.repositories import DetalleVentaRepository, IngresoMercaderiaRepository, ProductoRepository, VentaMarketRepository
+from market.models import UbicacionStock
+from market.repositories import DetalleVentaRepository, IngresoMercaderiaRepository, ProductoRepository, StockTransferRepository, VentaMarketRepository
 
 # Importaciones de caja activa
 from caja.views import _caja_activa
@@ -28,8 +29,62 @@ class IngresoMercaderiaService(BaseService):
             fecha=ingreso_data.get('fecha'),
             trabajador=trabajador,
         )
-        producto_repo.update(producto.id, stock_actual=producto.stock_actual + ingreso_data['cantidad'])
+        producto_repo.update(
+            producto.id,
+            stock_almacen=producto.stock_almacen + ingreso_data['cantidad'],
+        )
         return ingreso
+
+
+class StockTransferService(BaseService):
+    repository_class = StockTransferRepository
+
+    @transaction.atomic
+    def transferir_stock(self, producto_id, origen, destino, cantidad, trabajador, motivo=''):
+        if origen == destino:
+            raise ValueError('El origen y destino no pueden ser los mismos.')
+
+        producto_repo = ProductoRepository()
+        producto = producto_repo.get_by_id(producto_id)
+
+        campos_stock = {
+            UbicacionStock.ALMACEN: 'stock_almacen',
+            UbicacionStock.RECEPCION: 'stock_recepcion',
+            UbicacionStock.REFRIGERADORA: 'stock_refrigeradora',
+        }
+
+        campo_origen = campos_stock[origen]
+        campo_destino = campos_stock[destino]
+
+        stock_origen = getattr(producto, campo_origen)
+
+        if stock_origen < cantidad:
+            raise ValueError(
+                f'Stock insuficiente en {UbicacionStock(origen).label}: '
+                f'tiene {stock_origen}, necesita {cantidad}'
+            )
+
+        # Descontar del origen e incrementar al destino
+        producto_repo.update(
+            producto.id,
+            **{campo_origen: stock_origen - cantidad},
+        )
+        producto_repo.update(
+            producto.id,
+            **{campo_destino: getattr(producto, campo_destino) + cantidad},
+        )
+
+        # Registrar la transferencia en el historial
+        transferencia = self.repository.create(
+            producto=producto,
+            origen=origen,
+            destino=destino,
+            cantidad=cantidad,
+            trabajador=trabajador,
+            motivo=motivo,
+        )
+
+        return transferencia
 
 
 class VentaMarketService(BaseService):
@@ -60,9 +115,16 @@ class VentaMarketService(BaseService):
         for item in detalles_data:
             producto = self.producto_repo.get_by_id(item['producto_id'])
             amount = item['cantidad']
+            ubicacion = item['ubicacion_stock']
+            campo_stock = {
+                UbicacionStock.ALMACEN: 'stock_almacen',
+                UbicacionStock.RECEPCION: 'stock_recepcion',
+                UbicacionStock.REFRIGERADORA: 'stock_refrigeradora',
+            }[ubicacion]
+            stock_disponible = getattr(producto, campo_stock)
 
-            if producto.stock_actual < amount:
-                raise ValueError(f"Stock insuficiente para el producto: {producto.nombre}")
+            if stock_disponible < amount:
+                raise ValueError(f"Stock insuficiente en {UbicacionStock(ubicacion).label} para el producto: {producto.nombre}")
 
             subtotal = producto.precio_unitario * amount
             total_venta += subtotal
@@ -70,13 +132,16 @@ class VentaMarketService(BaseService):
             self.detalle_repo.create(
                 venta=venta,
                 producto=producto,
+                ubicacion_stock=ubicacion,
                 cantidad=amount,
                 precio_unitario=producto.precio_unitario,
                 subtotal=subtotal
             )
 
-            nuevo_stock = producto.stock_actual - amount
-            self.producto_repo.update(producto.id, stock_actual=nuevo_stock)
+            self.producto_repo.update(
+                producto.id,
+                **{campo_stock: stock_disponible - amount},
+            )
 
         self.repository.update(venta.id, total=total_venta)
         

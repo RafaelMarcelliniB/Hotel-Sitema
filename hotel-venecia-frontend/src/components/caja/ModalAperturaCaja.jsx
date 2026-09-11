@@ -1,17 +1,35 @@
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { Modal } from '../ui/Modal' 
 import Input from '../ui/Input'
 import Button from '../ui/Button'
 import Select from '../ui/Select'
 import { useCajas } from '../../hooks/useCajas'
+import api from '../../api/axiosConfig'
 
 export default function ModalAperturaCaja({ open, onClose }) {
   const { abrirCaja } = useCajas()
   
   // CORRECCIÓN: Los defaultValues deben coincidir con las claves del modelo en Django
-  const { register, handleSubmit } = useForm({
+  const { register, handleSubmit, setValue } = useForm({
     defaultValues: { monto_inicial: 0, turno: 'mañana' }
   })
+
+  const [montoSugerido, setMontoSugerido] = useState(0)
+
+  useEffect(() => {
+    if (!open) return
+    api.get('/caja/apertura/sugerida/')
+      .then(({ data }) => {
+        const sugerido = Number(data.monto_sugerido || 0)
+        setMontoSugerido(sugerido)
+        setValue('monto_inicial', sugerido)
+      })
+      .catch(() => {
+        setMontoSugerido(0)
+        setValue('monto_inicial', 0)
+      })
+  }, [open, setValue])
 
   if (!open) return null
 
@@ -41,6 +59,9 @@ export default function ModalAperturaCaja({ open, onClose }) {
             step="0.10"
             {...register('monto_inicial', { required: true })}
           />
+          <p className="mt-1 text-xs text-blue-700">
+            Monto inicial sugerido del turno anterior: S/ {montoSugerido.toFixed(2)}
+          </p>
         </div>
         
         <div className="space-y-1">

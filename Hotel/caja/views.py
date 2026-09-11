@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from caja.models import Caja, MovimientoCaja
-from hotel.models import Habitacion
+from hotel.models import Habitacion, CheckIn
 from market.models import DetalleVenta
 from caja.serializers import (
     CajaAperturaSerializer,
@@ -20,6 +20,8 @@ from caja.serializers import (
     CajaSerializer,
     MovimientoCajaInputSerializer,
     MovimientoCajaSerializer,
+    EgresoInputSerializer,
+    AjusteTarifaInputSerializer,
 )
 from caja.services import CajaService, MovimientoCajaService
 
@@ -72,11 +74,16 @@ def _serializar_resumen(caja):
         'caja': CajaSerializer(caja).data,
         'monto_inicial': resumen['monto_inicial'],
         'total_efectivo': resumen['total_efectivo'],
+        'ingresos_efectivo': resumen['ingresos_efectivo'],
         'total_yape': resumen['total_yape'],
+        'ingresos_yape': resumen['ingresos_yape'],
         'total_tarjeta': resumen['total_tarjeta'],
+        'ingresos_tarjeta': resumen['ingresos_tarjeta'],
         'total_ingresos': resumen['total_ingresos'],
         'total_egresos': resumen['total_egresos'],
         'total_general': resumen['total_general'],  # <-- AGREGADO: Envía el total real al JSON del Frontend
+        'efectivo_en_cajon': resumen['monto_esperado_efectivo'],
+        'monto_esperado_efectivo': resumen['monto_esperado_efectivo'],
         'deudas_pendientes': MovimientoCajaSerializer(resumen['deudas_pendientes'], many=True).data,
         'movimientos': movimientos_serializados,
         'movimientos_por_modulo': {modulo: items for modulo, items in agrupados.items()},
@@ -116,7 +123,18 @@ class CajaCierreView(APIView):
         serializer = CajaCierreSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
-        caja_cerrada = CajaService().cerrar_caja(caja)
+        caja_cerrada = CajaService().cerrar_caja(caja, serializer.validated_data)
+        from users.models import AuditLog
+        AuditLog.objects.create(
+            trabajador=request.user,
+            accion='caja_cerrada',
+            modulo='caja',
+            detalle=(
+                f'Caja #{caja.id}; esperado={caja_cerrada.monto_esperado}; '
+                f'real={caja_cerrada.monto_real}; diferencia={caja_cerrada.diferencia}; '
+                f'notas={caja_cerrada.notas_cierre}'
+            ),
+        )
         return Response(CajaSerializer(caja_cerrada).data)
 
 
@@ -370,6 +388,50 @@ class MovimientoCajaPagarDeudaView(APIView):
         return Response(MovimientoCajaSerializer(movimiento).data)
 
 
+class CajaAperturaSugeridaView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        caja_anterior = Caja.objects.filter(
+            trabajador=request.user,
+            fecha_apertura=timezone.localdate(),
+            estado=Caja.Estado.CERRADA,
+        ).order_by('-fecha_cierre', '-hora_cierre').first()
+        return Response({
+            'monto_sugerido': caja_anterior.monto_final if caja_anterior else 0,
+            'caja_anterior_id': caja_anterior.id if caja_anterior else None,
+        })
+
+
+class CajaEgresoView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        caja = _caja_activa(request.user)
+        if not caja:
+            return Response({'detail': 'No existe una caja abierta.'}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = EgresoInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        movimiento = MovimientoCajaService().registrar_egreso(serializer.validated_data, caja, request.user)
+        return Response(MovimientoCajaSerializer(movimiento).data, status=status.HTTP_201_CREATED)
+
+
+class CajaAjusteTarifaView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        caja = _caja_activa(request.user)
+        if not caja:
+            return Response({'detail': 'No existe una caja abierta.'}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = AjusteTarifaInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            movimiento = MovimientoCajaService().ajustar_tarifa(serializer.validated_data, caja, request.user)
+        except Exception as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(MovimientoCajaSerializer(movimiento).data, status=status.HTTP_201_CREATED)
+
+
 class HealthCajaView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -409,7 +471,7 @@ class CajaReporteExcelView(APIView):
         ws = wb.active
         ws.title = 'Movimientos'
 
-        headers = ['Fecha / Hora', 'Módulo', 'Descripción', 'Tipo', 'Trabajador', 'Monto', 'Referencia', 'Detalle']
+        headers = ['Fecha / Hora', 'Módulo', 'Descripción', 'Tipo', 'Método de Pago', 'Trabajador', 'Monto', 'Referencia', 'Detalle']
         for col_idx, h in enumerate(headers, start=1):
             cell = ws.cell(row=1, column=col_idx, value=h)
             cell.font = Font(bold=True)
@@ -437,23 +499,25 @@ class CajaReporteExcelView(APIView):
             detalle = _field(mov, 'detalle', '')
             modulo = _field(mov, 'modulo')
             tipo = _field(mov, 'tipo')
+            tipo_caja = _field(mov, 'tipo_caja')
 
             ws.cell(row=row_idx, column=1, value=fecha_val)
             ws.cell(row=row_idx, column=2, value=modulo)
             ws.cell(row=row_idx, column=3, value=descripcion)
             ws.cell(row=row_idx, column=4, value=tipo)
-            ws.cell(row=row_idx, column=5, value=str(trabajador) if trabajador is not None else '')
+            ws.cell(row=row_idx, column=5, value=tipo_caja)
+            ws.cell(row=row_idx, column=6, value=str(trabajador) if trabajador is not None else '')
             try:
-                ws.cell(row=row_idx, column=6, value=float(monto))
+                ws.cell(row=row_idx, column=7, value=float(monto))
             except Exception:
-                ws.cell(row=row_idx, column=6, value=0)
-            ws.cell(row=row_idx, column=7, value=referencia)
-            ws.cell(row=row_idx, column=8, value=detalle)
+                ws.cell(row=row_idx, column=7, value=0)
+            ws.cell(row=row_idx, column=8, value=referencia)
+            ws.cell(row=row_idx, column=9, value=detalle)
 
         # Totales
         total_row = len(movimientos) + 3
-        ws.cell(row=total_row, column=5, value='Total').font = Font(bold=True)
-        ws.cell(row=total_row, column=6, value=float(resumen.get('total_general', 0))).font = Font(bold=True)
+        ws.cell(row=total_row, column=6, value='Total').font = Font(bold=True)
+        ws.cell(row=total_row, column=7, value=float(resumen.get('total_general', 0))).font = Font(bold=True)
 
         self._auto_adjust_columns(ws)
 
@@ -480,6 +544,16 @@ class CajaReporteExcelView(APIView):
             ws2.cell(row=idx, column=7, value=det.venta.metodo_pago)
 
         self._auto_adjust_columns(ws2)
+
+        ws3 = wb.create_sheet(title='Resumen por pago')
+        ws3.append(['Concepto', 'Efectivo', 'Yape', 'Tarjeta', 'Total'])
+        ws3.append(['Ingresos', float(resumen['ingresos_efectivo']), float(resumen['ingresos_yape']), float(resumen['ingresos_tarjeta']), float(resumen['total_ingresos'])])
+        ws3.append(['Egresos', float(resumen['egresos_efectivo']), float(resumen['egresos_yape']), float(resumen['egresos_tarjeta']), float(resumen['total_egresos'])])
+        ws3.append(['Monto inicial', float(resumen['monto_inicial']), 0, 0, float(resumen['monto_inicial'])])
+        ws3.append(['Total general', '', '', '', float(resumen['total_general'])])
+        for cell in ws3[1]:
+            cell.font = Font(bold=True)
+        self._auto_adjust_columns(ws3)
 
         # Preparar respuesta con nombre dinámico según rol/turno/fecha (zona America/Lima)
         f = io.BytesIO()
@@ -523,6 +597,41 @@ class ReportesVentasExcelView(APIView):
             return date.fromisoformat(value)
         except Exception:
             return None
+
+    def _get_huesped_data(self, movimiento):
+        data = {'dni': '', 'nombre_huesped': '', 'apellido_huesped': ''}
+        if not movimiento:
+            return data
+
+        try:
+            for haystack in (movimiento.referencia, movimiento.descripcion):
+                if not haystack:
+                    continue
+                match = re.search(r'Check(?:-\s*|\s+)?In\s*(?:#|No\.?\s*)?(\d+)', haystack, re.IGNORECASE)
+                if match:
+                    try:
+                        checkin = CheckIn.objects.select_related('huesped').get(pk=int(match.group(1)))
+                        data['dni'] = getattr(checkin.huesped, 'dni_pasaporte', '') or ''
+                        data['nombre_huesped'] = getattr(checkin.huesped, 'nombre', '') or ''
+                        data['apellido_huesped'] = getattr(checkin.huesped, 'apellido', '') or ''
+                        return data
+                    except CheckIn.DoesNotExist:
+                        pass
+
+            descripcion = movimiento.descripcion or ''
+            match_huesped = re.search(r'Huésped\s*:\s*([^\-]+)', descripcion, re.IGNORECASE)
+            if match_huesped:
+                nombre_completo = match_huesped.group(1).strip()
+                partes = nombre_completo.split()
+                if len(partes) >= 2:
+                    data['nombre_huesped'] = partes[0]
+                    data['apellido_huesped'] = ' '.join(partes[1:])
+                elif partes:
+                    data['nombre_huesped'] = partes[0]
+
+            return data
+        except Exception:
+            return data
 
     def _build_date_range(self, request):
         periodo = request.query_params.get('periodo', '').strip().lower()
@@ -648,12 +757,13 @@ class ReportesVentasExcelView(APIView):
             ws = wb.active
             ws.title = 'Reporte Trabajador'
 
-            headers = ['Fecha / Hora', 'Trabajador', 'Turno', 'Módulo', 'Tipo', 'Pago', 'Monto', 'Referencia', 'Descripción']
+            headers = ['Fecha / Hora', 'Trabajador', 'Turno', 'Módulo', 'Tipo', 'Pago', 'Monto', 'Referencia', 'DNI', 'Nombre Huésped', 'Apellido Huésped', 'Descripción']
             for col_idx, h in enumerate(headers, start=1):
                 cell = ws.cell(row=1, column=col_idx, value=h)
                 cell.font = Font(bold=True)
 
             for idx, mov in enumerate(movimientos, start=2):
+                huesped_data = self._get_huesped_data(mov)
                 ws.cell(row=idx, column=1, value=mov.fecha_hora.strftime('%Y-%m-%d %H:%M:%S'))
                 ws.cell(row=idx, column=2, value=str(mov.trabajador))
                 ws.cell(row=idx, column=3, value=mov.turno)
@@ -662,13 +772,16 @@ class ReportesVentasExcelView(APIView):
                 ws.cell(row=idx, column=6, value=mov.tipo_caja)
                 ws.cell(row=idx, column=7, value=float(mov.monto))
                 ws.cell(row=idx, column=8, value=mov.referencia)
-                ws.cell(row=idx, column=9, value=mov.descripcion)
+                ws.cell(row=idx, column=9, value=huesped_data['dni'])
+                ws.cell(row=idx, column=10, value=huesped_data['nombre_huesped'])
+                ws.cell(row=idx, column=11, value=huesped_data['apellido_huesped'])
+                ws.cell(row=idx, column=12, value=mov.descripcion)
 
             # Totales
             total = movimientos.filter(tipo=MovimientoCaja.Tipo.INGRESO).aggregate(total=Sum('monto')).get('total') or 0
             total_row = movimientos.count() + 3
             ws.cell(row=total_row, column=8, value='Total').font = Font(bold=True)
-            ws.cell(row=total_row, column=9, value=float(total)).font = Font(bold=True)
+            ws.cell(row=total_row, column=12, value=float(total)).font = Font(bold=True)
 
             self._auto_adjust_columns(ws)
 

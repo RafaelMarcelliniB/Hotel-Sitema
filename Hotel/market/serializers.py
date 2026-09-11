@@ -1,13 +1,28 @@
 from rest_framework import serializers
 
 from core.base_serializers import BaseSerializer
-from market.models import Categoria, DetalleVenta, IngresoMercaderia, Producto, VentaMarket
+from market.models import Categoria, DetalleVenta, IngresoMercaderia, Producto, StockTransfer, UbicacionStock, VentaMarket
 
 
 class ProductoSerializer(BaseSerializer):
+    stock_total = serializers.IntegerField(read_only=True)
+    ubicaciones_disponibles = serializers.SerializerMethodField()
+
     class Meta:
         model = Producto
         fields = '__all__'
+        read_only_fields = ('stock_total', 'ubicaciones_disponibles')
+
+    def get_ubicaciones_disponibles(self, obj):
+        return [
+            ubicacion.value
+            for ubicacion, campo in (
+                (UbicacionStock.ALMACEN, 'stock_almacen'),
+                (UbicacionStock.RECEPCION, 'stock_recepcion'),
+                (UbicacionStock.REFRIGERADORA, 'stock_refrigeradora'),
+            )
+            if getattr(obj, campo) > 0
+        ]
 
 
 class IngresoMercaderiaSerializer(BaseSerializer):
@@ -42,6 +57,7 @@ class IngresoMercaderiaCreateSerializer(serializers.Serializer):
 class VentaDetalleInputSerializer(serializers.Serializer):
     producto_id = serializers.IntegerField()
     cantidad = serializers.IntegerField(min_value=1)
+    ubicacion_stock = serializers.ChoiceField(choices=UbicacionStock.choices)
 
 
 class VentaMarketCreateSerializer(serializers.Serializer):
@@ -49,6 +65,20 @@ class VentaMarketCreateSerializer(serializers.Serializer):
     checkin_vinculado_id = serializers.IntegerField(required=False, allow_null=True)
     metodo_pago = serializers.ChoiceField(choices=VentaMarket.MetodoPago.choices)
     detalles = VentaDetalleInputSerializer(many=True)
+
+
+class StockTransferCreateSerializer(serializers.Serializer):
+    producto_id = serializers.IntegerField(required=False, allow_null=True)
+    origen = serializers.ChoiceField(choices=UbicacionStock.choices)
+    destino = serializers.ChoiceField(choices=UbicacionStock.choices)
+    cantidad = serializers.IntegerField(min_value=1)
+    motivo = serializers.CharField(max_length=200, required=False, allow_blank=True)
+
+
+class StockTransferSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StockTransfer
+        fields = '__all__'
 
 # ════════════════════════════════════════
 # SOLID APLICADO EN ESTE ARCHIVO:

@@ -1,5 +1,5 @@
 from core.base_repositories import BaseRepository
-from market.models import DetalleVenta, IngresoMercaderia, Producto, VentaMarket
+from market.models import DetalleVenta, IngresoMercaderia, Producto, StockTransfer, VentaMarket
 
 
 class ProductoRepository(BaseRepository):
@@ -27,9 +27,13 @@ class VentaMarketRepository(BaseRepository):
             queryset = queryset.filter(detalles__producto_id=producto_id).distinct()
 
         return queryset.order_by('-fecha', '-hora')
-    
 class DetalleVentaRepository(BaseRepository):
     model = DetalleVenta
+
+
+class StockTransferRepository(BaseRepository):
+    model = StockTransfer
+
 
 # ════════════════════════════════════════
 # SOLID APLICADO EN ESTE ARCHIVO:

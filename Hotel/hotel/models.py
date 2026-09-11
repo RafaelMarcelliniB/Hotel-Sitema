@@ -32,6 +32,7 @@ class Habitacion(BaseModel):
 		OCUPADO = 'OCUPADO', 'Ocupado'
 		RESERVADO = 'RESERVADO', 'Reservado'
 		BLOQUEADO = 'BLOQUEADO', 'Bloqueado'
+		MANTENIMIENTO = 'MANTENIMIENTO', 'Mantenimiento'
 
 	class EstadoLimpieza(models.TextChoices):
 		LIMPIO = 'LIMPIO', 'Limpio'
@@ -90,6 +91,8 @@ class CheckIn(BaseModel):
 	class TipoPago(models.TextChoices):
 		EFECTIVO = 'EFECTIVO', 'Efectivo'
 		YAPE = 'YAPE', 'Yape'
+		PLIN = 'PLIN', 'Plin'
+		TRANSFERENCIA = 'TRANSFERENCIA', 'Transferencia'
 		TARJETA = 'TARJETA', 'Tarjeta'
 
 	class Estado(models.TextChoices):
@@ -167,6 +170,8 @@ class Reserva(BaseModel):
 	class TipoPagoAdelanto(models.TextChoices):
 		EFECTIVO = 'EFECTIVO', 'Efectivo'
 		YAPE = 'YAPE', 'Yape'
+		PLIN = 'PLIN', 'Plin'
+		TRANSFERENCIA = 'TRANSFERENCIA', 'Transferencia'
 		TARJETA = 'TARJETA', 'Tarjeta'
 
 	huesped = models.ForeignKey(Huesped, on_delete=models.PROTECT, related_name='reservas')
