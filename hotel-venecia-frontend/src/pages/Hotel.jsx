@@ -4,7 +4,9 @@ import HabitacionCard from '../components/hotel/HabitacionCard'
 import ModalCheckIn from '../components/hotel/ModalCheckIn'
 import ModalCheckOut from '../components/hotel/ModalCheckOut' 
 import ModalProcesarReserva from '../components/reservas/ModalProcesarReserva'
+import ModalNuevaHabitacion from '../components/hotel/ModalNuevaHabitacion'
 import Spinner from '../components/ui/Spinner'
+import { Button } from '../components/ui/Button'
 import api from '../api/axiosConfig' 
 
 export default function Hotel() {
@@ -14,6 +16,7 @@ export default function Hotel() {
   const [showCheckIn, setShowCheckIn] = useState(false)
   const [showCheckOut, setShowCheckOut] = useState(false) 
   const [showProcesarReserva, setShowProcesarReserva] = useState(false)
+  const [showNuevaHabitacion, setShowNuevaHabitacion] = useState(false)
   const [checkInInitialData, setCheckInInitialData] = useState(null)
 
   // Nueva función para consumir el endpoint de limpieza que tienes en Django
@@ -88,6 +91,7 @@ export default function Hotel() {
     setShowCheckIn(false);
     setShowCheckOut(false);
     setShowProcesarReserva(false);
+    setShowNuevaHabitacion(false);
     setSelectedHab(null);
     setCheckInInitialData(null)
   };
@@ -134,9 +138,14 @@ export default function Hotel() {
 
   return (
     <div className="p-6 bg-slate-50 min-h-screen">
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-slate-800">Mapa de Habitaciones</h2>
-        <p className="text-sm text-slate-500">Selecciona una habitación disponible para ingreso o una ocupada para salida</p>
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">Mapa de Habitaciones</h2>
+          <p className="text-sm text-slate-500">Selecciona una habitación disponible para ingreso o una ocupada para salida</p>
+        </div>
+        <Button onClick={() => setShowNuevaHabitacion(true)} className="w-full sm:w-auto">
+          + Añadir Habitación
+        </Button>
       </div>
       
       <div className="mb-6 flex flex-wrap gap-2" role="tablist" aria-label="Filtrar habitaciones por piso">
@@ -202,6 +211,14 @@ export default function Hotel() {
           onClose={() => setShowProcesarReserva(false)}
           onSuccess={handleProcesarSuccess}
           onOpenCheckIn={handleOpenCheckInFromReserva}
+        />
+      )}
+
+      {/* Modal para Nueva Habitación */}
+      {showNuevaHabitacion && (
+        <ModalNuevaHabitacion 
+          habitaciones={habitaciones}
+          onClose={handleCloseModals}
         />
       )}
     </div>

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getHabitaciones } from '../api/hotelApi'
+import { getHabitaciones, crearHabitacion } from '../api/hotelApi'
 import api from '../api/axiosConfig'
 
 export function useHabitaciones() {
@@ -28,10 +28,20 @@ export function useHabitaciones() {
     }
   })
 
+  const crearMutation = useMutation({
+    mutationFn: crearHabitacion,
+    onSuccess: () => {
+      queryClient.invalidateQueries(['habitaciones'])
+      queryClient.invalidateQueries(['dashboard-metrics'])
+    }
+  })
+
   return {
     ...query,
     habitaciones: query.data || [],
     cambiarEstado: mutation.mutateAsync,
+    crearHabitacion: crearMutation.mutateAsync,
+    isCreating: crearMutation.isLoading,
     isUpdating: mutation.isLoading
   }
 }

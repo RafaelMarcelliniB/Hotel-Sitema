@@ -5,18 +5,25 @@ import { Button } from '../components/ui/Button'
 import { useEspacios } from '../hooks/useEspacios'
 import Spinner from '../components/ui/Spinner'
 import ModalIngresoCochera from '../components/cochera/ModalIngresoCochera'
-import ModalSalidaCochera from '../components/cochera/ModalSalidaCochera' // <-- Importamos tu modal de salida
+import ModalSalidaCochera from '../components/cochera/ModalSalidaCochera'
+import ModalNuevoEspacio from '../components/cochera/ModalNuevoEspacio'
 
 export default function Cochera() {
   const { espacios, isLoading } = useEspacios()
   const [selectedEspacio, setSelectedEspacio] = useState(null)
-  const [selectedEspacioSalida, setSelectedEspacioSalida] = useState(null) // <-- Nuevo estado para controlar la salida
+  const [selectedEspacioSalida, setSelectedEspacioSalida] = useState(null)
+  const [showNuevoEspacio, setShowNuevoEspacio] = useState(false)
 
   if (isLoading) return <Spinner />
 
   return (
     <div className="p-6">
-      <h2 className="text-2xl font-bold mb-6 text-slate-800">Control de Cochera</h2>
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <h2 className="text-2xl font-bold text-slate-800">Control de Cochera</h2>
+        <Button onClick={() => setShowNuevoEspacio(true)} className="w-full sm:w-auto">
+          + Añadir Espacio
+        </Button>
+      </div>
       
       <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-4">
         {espacios.map((espacio) => (
@@ -89,6 +96,14 @@ export default function Cochera() {
         <ModalSalidaCochera 
           espacio={selectedEspacioSalida} 
           onClose={() => setSelectedEspacioSalida(null)} 
+        />
+      )}
+
+      {/* MODAL NUEVO ESPACIO */}
+      {showNuevoEspacio && (
+        <ModalNuevoEspacio 
+          espacios={espacios}
+          onClose={() => setShowNuevoEspacio(false)}
         />
       )}
     </div>

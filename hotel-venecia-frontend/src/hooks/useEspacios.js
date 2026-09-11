@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getEspacios } from '../api/cocheraApi'
+import { getEspacios, crearEspacio } from '../api/cocheraApi'
 import api from '../api/axiosConfig'
 
 export function useEspacios() {
@@ -35,11 +35,21 @@ export function useEspacios() {
     }
   })
 
+  const crearEspacioMutation = useMutation({
+    mutationFn: crearEspacio,
+    onSuccess: () => {
+      queryClient.invalidateQueries(['espacios'])
+      queryClient.invalidateQueries(['dashboard-metrics'])
+    }
+  })
+
   return {
     ...query,
     espacios: query.data || [],
-    registrarIngreso: registrarIngreso.mutateAsync, // Retorna la función directa
-    registrarSalida: registrarSalida.mutateAsync,   // Retorna la función directa
+    registrarIngreso: registrarIngreso.mutateAsync,
+    registrarSalida: registrarSalida.mutateAsync,
+    crearEspacio: crearEspacioMutation.mutateAsync,
+    isCreatingEspacio: crearEspacioMutation.isLoading,
     isMutating: registrarIngreso.isLoading || registrarSalida.isLoading
   }
 }
