@@ -11,6 +11,7 @@ function buildLinksForRole(role) {
     { to: '/caja', label: 'Caja' },
     { to: '/recados', label: 'Recados' },
     { to: '/trabajadores', label: 'Usuarios' },
+    { to: '/administracion', label: 'Administración' },
   ]
 
   if (!role) return [{ to: '/', label: 'Dashboard' }]

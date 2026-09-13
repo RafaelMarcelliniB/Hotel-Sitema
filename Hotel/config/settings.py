@@ -90,16 +90,26 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.getenv('DB_NAME', os.getenv('MYSQL_DATABASE', 'hotel_db')),
-        'USER': os.getenv('DB_USER', os.getenv('MYSQL_USER', 'root')),
-        'PASSWORD': os.getenv('DB_PASSWORD', os.getenv('MYSQL_PASSWORD', '')),
-        'HOST': os.getenv('DB_HOST', os.getenv('MYSQL_HOST', '127.0.0.1')),
-        'PORT': os.getenv('DB_PORT', os.getenv('MYSQL_PORT', '3306')),
+if os.getenv('DESKTOP_MODE', '').lower() in {'1', 'true', 'yes'}:
+    desktop_data_dir = Path(os.getenv('LOCALAPPDATA', Path.home())) / 'HotelSistema'
+    desktop_data_dir.mkdir(parents=True, exist_ok=True)
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': desktop_data_dir / 'hotel.sqlite3',
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.mysql',
+            'NAME': os.getenv('DB_NAME', os.getenv('MYSQL_DATABASE', 'hotel_db')),
+            'USER': os.getenv('DB_USER', os.getenv('MYSQL_USER', 'root')),
+            'PASSWORD': os.getenv('DB_PASSWORD', os.getenv('MYSQL_PASSWORD', '')),
+            'HOST': os.getenv('DB_HOST', os.getenv('MYSQL_HOST', '127.0.0.1')),
+            'PORT': os.getenv('DB_PORT', os.getenv('MYSQL_PORT', '3306')),
+        }
+    }
 
 AUTH_USER_MODEL = 'users.Trabajador'
 

@@ -90,6 +90,12 @@ class ProductoViewSet(viewsets.ModelViewSet):
 	serializer_class = ProductoSerializer
 	permission_classes = [IsAuthenticated]
 
+	def create(self, request, *args, **kwargs):
+		rol = (getattr(request.user, 'rol', '') or '').lower()
+		if rol not in ('admin', 'administrador') and not request.user.is_superuser:
+			return Response({'detail': 'Solo un administrador puede crear productos.'}, status=status.HTTP_403_FORBIDDEN)
+		return super().create(request, *args, **kwargs)
+
 	def get_queryset(self):
 		queryset = super().get_queryset()
 		stock_bajo = self.request.query_params.get('stock_bajo')

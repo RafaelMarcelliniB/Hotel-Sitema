@@ -32,6 +32,11 @@ class EspacioCocheraViewSet(viewsets.ModelViewSet):
     serializer_class = EspacioCocheraSerializer
     permission_classes = [IsAuthenticated]
 
+    def create(self, request, *args, **kwargs):
+        if getattr(request.user, 'rol', '').lower() != 'admin' and not request.user.is_superuser:
+            return Response({'detail': 'Solo un administrador puede crear espacios.'}, status=status.HTTP_403_FORBIDDEN)
+        return super().create(request, *args, **kwargs)
+
     def get_queryset(self):
         if not _user_can_access_cochera(self.request.user):
             return RegistroVehiculo.objects.none()

@@ -5,6 +5,9 @@ export async function login({ username, password }) {
     const { data } = await api.post('/users/auth/login/', { username, password })
     return data
   } catch (error) {
+    if (!error.response) {
+      throw new Error('No se pudo conectar con el servidor. Inicia el backend Django en el puerto 8000.')
+    }
     const detail = error?.response?.data?.detail || 'Credenciales inválidas'
     throw new Error(detail)
   }
