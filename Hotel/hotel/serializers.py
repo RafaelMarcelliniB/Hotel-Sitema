@@ -14,6 +14,8 @@ class HabitacionSerializer(BaseSerializer):
             'numero', 
             'piso',
             'tipo', 
+            'marca_tv',
+            'tipo_cama',
             'tarifa_dia', 
             'tarifa_noche', 
             'tarifa_madrugada',

@@ -12,6 +12,7 @@ import Market from './pages/Market'
 import NotFound from './pages/NotFound'
 import Recados from './pages/Recados'
 import Trabajadores from './pages/Trabajadores'
+import Administracion from './pages/Administracion'
 
 export const router = createBrowserRouter([
   {
@@ -51,6 +52,10 @@ export const router = createBrowserRouter([
       { 
         path: 'trabajadores', 
         element: <ProtectedRoute allowedRoles={['admin']}><Trabajadores /></ProtectedRoute> 
+      },
+      {
+        path: 'administracion',
+        element: <ProtectedRoute allowedRoles={['admin']}><Administracion /></ProtectedRoute>,
       },
     ],
   },

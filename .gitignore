@@ -1,2 +1,7 @@
 env/
 .agents/
+__pycache__/
+*.py[cod]
+build/
+hotel-venecia-frontend/dist/
+frontend_build/
