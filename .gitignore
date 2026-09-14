@@ -5,3 +5,4 @@ __pycache__/
 build/
 hotel-venecia-frontend/dist/
 frontend_build/
+installer_output/
