@@ -153,6 +153,13 @@ export default function Caja() {
                 setIsDownloading(true)
                 const { blob, headers } = await downloadCajaReporte(resumen.caja.id)
                 const fileName = getFileNameFromContentDisposition(headers?.['content-disposition']) || `reporte_caja_${resumen.caja.id}.xlsx`
+                if (window.pywebview?.api?.save_download) {
+                  const buffer = await blob.arrayBuffer()
+                  let binary = ''
+                  new Uint8Array(buffer).forEach((byte) => { binary += String.fromCharCode(byte) })
+                  await window.pywebview.api.save_download(fileName, btoa(binary))
+                  return
+                }
                 const url = window.URL.createObjectURL(new Blob([blob]))
                 const link = document.createElement('a')
                 link.href = url

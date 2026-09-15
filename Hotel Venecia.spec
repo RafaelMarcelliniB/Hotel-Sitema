@@ -1,7 +1,16 @@
-# -*- mode: python ; coding: utf-8 -*-
+ # -*- mode: python ; coding: utf-8 -*-
+import os
+import sys
+
+sys.path.insert(0, os.path.abspath('Hotel'))
+
 from PyInstaller.utils.hooks import collect_submodules
 
-hiddenimports = ['config', 'config.settings', 'config.wsgi']
+hiddenimports = [
+    'config', 'config.settings', 'config.wsgi',
+    'users', 'users.admin', 'users.apps', 'users.models', 'users.repositories',
+    'users.serializers', 'users.services', 'users.tests', 'users.urls', 'users.views',
+]
 hiddenimports += collect_submodules('config')
 hiddenimports += collect_submodules('users')
 hiddenimports += collect_submodules('hotel')
@@ -19,9 +28,12 @@ hiddenimports += collect_submodules('django_filters')
 
 a = Analysis(
     ['main.py'],
-    pathex=['Hotel'],
+    pathex=[os.path.abspath('Hotel')],
     binaries=[],
-    datas=[('frontend_build', 'frontend_build')],
+    datas=[
+        ('frontend_build', 'frontend_build'),
+        ('Hotel/users', 'Hotel/users'),
+    ],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
