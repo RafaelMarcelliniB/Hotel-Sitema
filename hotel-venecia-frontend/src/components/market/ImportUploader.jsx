@@ -11,6 +11,7 @@ export default function ImportUploader({ onDone }) {
   const [open, setOpen] = useState(false)
   const [file, setFile] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [downloadMessage, setDownloadMessage] = useState('')
   const containerRef = useRef(null)
 
   // Cierra el dropdown al hacer click fuera
@@ -26,21 +27,38 @@ export default function ImportUploader({ onDone }) {
   const headers = ['Nombre', 'Categoria', 'Precio Unitario', 'Stock Almacen', 'Stock Recepcion', 'Stock Refrigeradora', 'Stock Minimo', 'Activo']
 
   async function downloadTemplate(format) {
+    setDownloadMessage('Generando plantilla...')
     try {
       const resp = await api.get(`/market/productos/plantilla/${format}/`, { responseType: 'blob' })
-      const blob = new Blob([resp.data], { type: resp.headers['content-type'] })
+      const contentType = resp.headers['content-type'] || (format === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'text/csv;charset=utf-8')
+      const blob = new Blob([resp.data], { type: contentType })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = format === 'xlsx' ? 'plantilla_productos.xlsx' : 'plantilla_productos.csv'
+      const disposition = resp.headers['content-disposition'] || ''
+      const serverName = disposition.match(/filename="?([^";]+)"?/i)?.[1]
+      const filename = serverName || (format === 'xlsx' ? 'plantilla_productos.xlsx' : 'plantilla_productos.csv')
+      if (window.pywebview?.api?.save_download) {
+        const buffer = await resp.data.arrayBuffer()
+        let binary = ''
+        new Uint8Array(buffer).forEach((byte) => { binary += String.fromCharCode(byte) })
+        const path = await window.pywebview.api.save_download(filename, btoa(binary))
+        setOpen(false)
+        setDownloadMessage(`Guardada en: ${path}`)
+        return
+      }
+      a.download = filename
+      a.style.display = 'none'
       document.body.appendChild(a)
       a.click()
       a.remove()
       window.URL.revokeObjectURL(url)
       setOpen(false)
+      setDownloadMessage(`Descargada: ${a.download}`)
     } catch (e) {
       console.error('Error al descargar plantilla', e)
-      alert('Error al descargar plantilla')
+      const status = e.response?.status ? ` (${e.response.status})` : ''
+      setDownloadMessage(`No se pudo descargar la plantilla${status}.`)
     }
   }
 
@@ -93,6 +111,7 @@ export default function ImportUploader({ onDone }) {
           </div>
         )}
       </div>
+      {downloadMessage && <span className="text-xs text-slate-500" role="status">{downloadMessage}</span>}
 
       {/* Formulario de carga */}
       <form onSubmit={handleSubmit} className="flex items-center space-x-2">

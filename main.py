@@ -8,6 +8,8 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import base64
+from pathlib import Path
 
 
 def find_free_port() -> int:
@@ -39,13 +41,29 @@ def main() -> None:
 
     import webview
 
+    class DesktopApi:
+        def save_download(self, filename: str, content_base64: str) -> str:
+            downloads_dir = Path.home() / "Downloads" / "Hotel Venecia"
+            downloads_dir.mkdir(parents=True, exist_ok=True)
+            safe_name = Path(filename).name
+            output_path = downloads_dir / safe_name
+            output_path.write_bytes(base64.b64decode(content_base64))
+            return str(output_path)
+
     port = find_free_port()
     url = f"http://127.0.0.1:{port}"
     start_backend(port)
 
     try:
         wait_for_server(f"{url}/health")
-        webview.create_window("Hotel Venecia", url, width=1280, height=800, min_size=(960, 640))
+        webview.create_window(
+            "Hotel Venecia",
+            url,
+            width=1280,
+            height=800,
+            min_size=(960, 640),
+            js_api=DesktopApi(),
+        )
         webview.start()
     finally:
         # El backend vive en el mismo proceso; al cerrar la ventana se finaliza la app.

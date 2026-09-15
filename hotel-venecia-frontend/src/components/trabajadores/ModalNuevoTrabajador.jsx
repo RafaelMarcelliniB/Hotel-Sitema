@@ -17,17 +17,26 @@ export default function ModalNuevoTrabajador({ onClose, initialData = null, id =
   }, [initialData, reset])
 
   const onSubmit = async (data) => {
+    const normalizedData = {
+      ...data,
+      username: (data.username || '').trim().toLowerCase().replace(/\s+/g, '.'),
+    }
     try {
       if (id) {
-        await editarTrabajador({ id, data })
+        await editarTrabajador({ id, data: normalizedData })
       } else {
-        await crearTrabajador(data)
+        await crearTrabajador(normalizedData)
       }
       onClose()
       reset()
       alert('Usuario guardado correctamente')
     } catch (err) {
-      const msg = err?.message || 'Error: los datos son inválidos o el usuario ya existe'
+      const detail = err?.response?.data?.detail
+      const validation = err?.response?.data && typeof err.response.data === 'object'
+        ? Object.entries(err.response.data).map(([field, value]) => `${field}: ${Array.isArray(value) ? value.join(', ') : value}`).join(' | ')
+        : ''
+      const status = err?.response?.status ? ` (HTTP ${err.response.status})` : ''
+      const msg = `${detail || validation || err?.message || 'Error: los datos son inválidos o el usuario ya existe'}${status}`
       alert(msg)
     }
   }

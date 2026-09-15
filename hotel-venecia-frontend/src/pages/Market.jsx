@@ -65,6 +65,7 @@ function categoriaCoincide(producto, categoria) {
 
 function TemplatesDropdown() {
   const [showTemplates, setShowTemplates] = useState(false)
+  const [downloadMessage, setDownloadMessage] = useState('')
   const ref = useRef(null)
 
   useEffect(() => {
@@ -77,21 +78,38 @@ function TemplatesDropdown() {
   }, [])
 
   async function downloadTemplate(format) {
+    setDownloadMessage('Generando plantilla...')
     try {
       const resp = await api.get(`/market/productos/plantilla/${format}/`, { responseType: 'blob' })
-      const blob = new Blob([resp.data], { type: resp.headers['content-type'] })
+      const contentType = resp.headers['content-type'] || (format === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'text/csv;charset=utf-8')
+      const blob = new Blob([resp.data], { type: contentType })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = format === 'xlsx' ? 'plantilla_productos.xlsx' : 'plantilla_productos.csv'
+      const disposition = resp.headers['content-disposition'] || ''
+      const serverName = disposition.match(/filename="?([^";]+)"?/i)?.[1]
+      const filename = serverName || (format === 'xlsx' ? 'plantilla_productos.xlsx' : 'plantilla_productos.csv')
+      if (window.pywebview?.api?.save_download) {
+        const buffer = await resp.data.arrayBuffer()
+        let binary = ''
+        new Uint8Array(buffer).forEach((byte) => { binary += String.fromCharCode(byte) })
+        const path = await window.pywebview.api.save_download(filename, btoa(binary))
+        setShowTemplates(false)
+        setDownloadMessage(`Guardada en: ${path}`)
+        return
+      }
+      a.download = filename
+      a.style.display = 'none'
       document.body.appendChild(a)
       a.click()
       a.remove()
       window.URL.revokeObjectURL(url)
       setShowTemplates(false)
+      setDownloadMessage(`Descargada: ${a.download}`)
     } catch (e) {
       console.error('Error al descargar plantilla', e)
-      alert('Error al descargar plantilla')
+      const status = e.response?.status ? ` (${e.response.status})` : ''
+      setDownloadMessage(`No se pudo descargar la plantilla${status}.`)
     }
   }
 
@@ -112,6 +130,7 @@ function TemplatesDropdown() {
           <button onClick={() => downloadTemplate('csv')} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">📝 Plantilla CSV (.csv)</button>
         </div>
       )}
+      {downloadMessage && <span className="mt-2 block text-xs text-slate-500" role="status">{downloadMessage}</span>}
     </div>
   )
 }

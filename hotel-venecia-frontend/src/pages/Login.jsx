@@ -10,7 +10,7 @@ import { useAuthStore } from '../store/authStore'
 export default function Login() {
   const navigate = useNavigate()
   const setSession = useAuthStore((state) => state.setSession)
-  const [form, setForm] = useState({ username: 'admin', password: 'admin' })
+  const [form, setForm] = useState({ username: '', password: '' })
   const [error, setError] = useState('')
 
   const handleSubmit = async (event) => {
