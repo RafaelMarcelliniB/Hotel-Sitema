@@ -1,6 +1,6 @@
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
+from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -17,13 +17,22 @@ class IsAdminOrSelf(IsAuthenticated):
 		return obj.pk == request.user.pk
 
 
+class IsAdminRole(BasePermission):
+	message = 'Se requieren privilegios de administrador.'
+
+	def has_permission(self, request, view):
+		user = getattr(request, 'user', None)
+		rol = (getattr(user, 'rol', '') or '').lower()
+		return bool(user and user.is_authenticated and (user.is_superuser or rol in ('admin', 'administrador')))
+
+
 class TrabajadorViewSet(viewsets.ModelViewSet):
 	queryset = Trabajador.objects.all().order_by('id')
 	permission_classes = [IsAuthenticated]
 
 	def get_permissions(self):
 		if self.action in {'list', 'create', 'destroy', 'cambiar_password', 'toggle_activo', 'por_turno'}:
-			permission_classes = [IsAdminUser]
+			permission_classes = [IsAdminRole]
 		elif self.action in {'retrieve', 'update', 'partial_update'}:
 			permission_classes = [IsAdminOrSelf]
 		else:
@@ -103,7 +112,7 @@ class TrabajadorViewSet(viewsets.ModelViewSet):
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
 	queryset = AuditLog.objects.all().order_by('-fecha_hora')
 	serializer_class = AuditLogSerializer
-	permission_classes = [IsAdminUser]
+	permission_classes = [IsAdminRole]
 
 	def get_queryset(self):
 		queryset = super().get_queryset()
