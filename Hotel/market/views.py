@@ -1,4 +1,5 @@
 from django.db.models import F
+from django.db.models.deletion import ProtectedError
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -95,6 +96,28 @@ class ProductoViewSet(viewsets.ModelViewSet):
 		if rol not in ('admin', 'administrador') and not request.user.is_superuser:
 			return Response({'detail': 'Solo un administrador puede crear productos.'}, status=status.HTTP_403_FORBIDDEN)
 		return super().create(request, *args, **kwargs)
+
+	def _es_admin(self, user):
+		rol = (getattr(user, 'rol', '') or '').lower()
+		return rol in ('admin', 'administrador') or user.is_superuser
+
+	def update(self, request, *args, **kwargs):
+		if not self._es_admin(request.user):
+			return Response({'detail': 'Solo un administrador puede editar productos.'}, status=status.HTTP_403_FORBIDDEN)
+		return super().update(request, *args, **kwargs)
+
+	def partial_update(self, request, *args, **kwargs):
+		if not self._es_admin(request.user):
+			return Response({'detail': 'Solo un administrador puede editar productos.'}, status=status.HTTP_403_FORBIDDEN)
+		return super().partial_update(request, *args, **kwargs)
+
+	def destroy(self, request, *args, **kwargs):
+		if not self._es_admin(request.user):
+			return Response({'detail': 'Solo un administrador puede eliminar productos.'}, status=status.HTTP_403_FORBIDDEN)
+		try:
+			return super().destroy(request, *args, **kwargs)
+		except ProtectedError:
+			return Response({'detail': 'No se puede eliminar este producto porque tiene ventas o movimientos relacionados.'}, status=status.HTTP_409_CONFLICT)
 
 	def get_queryset(self):
 		queryset = super().get_queryset()

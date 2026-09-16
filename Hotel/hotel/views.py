@@ -2,7 +2,9 @@ from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 
+from django.db import IntegrityError
 from django.db.models import Q
+from django.db.models.deletion import ProtectedError
 from django.db import models
 from django.db import transaction
 from django.db.models import Sum
@@ -277,7 +279,16 @@ class HabitacionViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         if not self._es_admin(request.user):
             return Response({'detail': 'Permisos insuficientes.'}, status=status.HTTP_403_FORBIDDEN)
-        return super().destroy(request, *args, **kwargs)
+        habitacion = self.get_object()
+        if habitacion.estado_ocupacion != Habitacion.EstadoOcupacion.DISPONIBLE:
+            return Response({'detail': 'Solo se puede eliminar una habitación disponible.'}, status=status.HTTP_409_CONFLICT)
+        try:
+            habitacion.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except ProtectedError:
+            return Response({'detail': 'No se puede eliminar esta habitación porque tiene reservas, check-ins o registros relacionados.'}, status=status.HTTP_409_CONFLICT)
+        except IntegrityError:
+            return Response({'detail': 'No se puede eliminar esta habitación porque tiene registros relacionados.'}, status=status.HTTP_409_CONFLICT)
 
 
 class HuespedViewSet(viewsets.ModelViewSet):

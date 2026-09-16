@@ -2,6 +2,7 @@ from rest_framework import status, viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from django.db.models.deletion import ProtectedError
 
 from caja.models import Caja, MovimientoCaja
 from cochera.models import EspacioCochera, RegistroVehiculo
@@ -32,10 +33,35 @@ class EspacioCocheraViewSet(viewsets.ModelViewSet):
     serializer_class = EspacioCocheraSerializer
     permission_classes = [IsAuthenticated]
 
+    def _es_admin(self, user):
+        return (getattr(user, 'rol', '') or '').lower() in ('admin', 'administrador') or user.is_superuser
+
     def create(self, request, *args, **kwargs):
-        if getattr(request.user, 'rol', '').lower() != 'admin' and not request.user.is_superuser:
+        if not self._es_admin(request.user):
             return Response({'detail': 'Solo un administrador puede crear espacios.'}, status=status.HTTP_403_FORBIDDEN)
         return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        if not self._es_admin(request.user):
+            return Response({'detail': 'Solo un administrador puede editar espacios.'}, status=status.HTTP_403_FORBIDDEN)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        if not self._es_admin(request.user):
+            return Response({'detail': 'Solo un administrador puede editar espacios.'}, status=status.HTTP_403_FORBIDDEN)
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if not self._es_admin(request.user):
+            return Response({'detail': 'Solo un administrador puede eliminar espacios.'}, status=status.HTTP_403_FORBIDDEN)
+        espacio = self.get_object()
+        if espacio.estado != EspacioCochera.Estado.LIBRE:
+            return Response({'detail': 'Solo se puede eliminar un espacio de cochera libre.'}, status=status.HTTP_409_CONFLICT)
+        try:
+            espacio.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except ProtectedError:
+            return Response({'detail': 'No se puede eliminar este espacio porque tiene registros de vehículos relacionados.'}, status=status.HTTP_409_CONFLICT)
 
     def get_queryset(self):
         if not _user_can_access_cochera(self.request.user):
