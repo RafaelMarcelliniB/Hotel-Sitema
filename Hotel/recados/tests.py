@@ -56,3 +56,27 @@ class RecadoApiTests(APITestCase):
         )
 
         self.assertEqual(invalid_response.status_code, 400)
+
+    def test_other_authenticated_user_can_start_recado(self):
+        recado = Recado.objects.create(
+            titulo='Atender habitación',
+            descripcion='Preparar la habitación para el siguiente huésped.',
+            categoria='LIMPIEZA',
+            creado_por=self.user,
+            trabajador_origen=self.user,
+            fecha=timezone.localdate(),
+        )
+        otro_usuario = get_user_model().objects.create_user(
+            username='empleado2',
+            password='12345678',
+        )
+        self.client.force_authenticate(otro_usuario)
+
+        response = self.client.patch(
+            f'/api/recados/{recado.id}/',
+            {'estado': 'PROCESO'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['estado'], 'PROCESO')

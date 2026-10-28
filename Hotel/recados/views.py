@@ -25,7 +25,7 @@ class RecadoViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_permissions(self):
-        if self.action in {'update', 'partial_update', 'destroy'}:
+        if self.action == 'destroy':
             permission_classes = [IsOriginOrAdmin]
         else:
             permission_classes = [IsAuthenticated]

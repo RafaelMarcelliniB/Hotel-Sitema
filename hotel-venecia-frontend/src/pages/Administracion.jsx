@@ -4,6 +4,8 @@ import { useAuthStore } from '../store/authStore'
 import Card from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
+import { confirmDialog } from '../utils/dialogs'
+import { apiErrorMessage } from '../utils/downloadFile'
 
 const initialRoom = {
   numero: '', piso: '1', tipo: 'SIMPLE', marca_tv: 'JVC', tipo_cama: 'DOS_PLAZAS',
@@ -32,8 +34,6 @@ export default function Administracion() {
   const [editing, setEditing] = useState(null)
   const [saving, setSaving] = useState(false)
 
-  if (user?.rol?.toLowerCase() !== 'admin') return null
-
   const loadData = async () => {
     const [roomsResponse, parkingResponse, productsResponse] = await Promise.all([
       api.get('/hotel/habitaciones/'),
@@ -46,6 +46,8 @@ export default function Administracion() {
   }
 
   useEffect(() => { loadData().catch(() => {}) }, [])
+
+  if (user?.rol?.toLowerCase() !== 'admin') return null
 
   const close = () => { setModal(null); setEditing(null); setSaving(false) }
   const update = (setter) => (event) => setter((current) => ({ ...current, [event.target.name]: event.target.value }))
@@ -60,7 +62,7 @@ export default function Administracion() {
       close()
       await loadData()
     } catch (error) {
-      alert(error.response?.data?.detail || 'No se pudo guardar el registro.')
+      alert(apiErrorMessage(error, 'No se pudo guardar el registro.'))
     } finally {
       setSaving(false)
     }
@@ -83,9 +85,9 @@ export default function Administracion() {
   }
 
   const remove = async (endpoint, id, label) => {
-    if (!window.confirm(`¿Eliminar ${label}?`)) return
+    if (!(await confirmDialog(`¿Eliminar ${label}?`))) return
     try { await api.delete(`${endpoint}${id}/`); await loadData(); alert(`${label} eliminado correctamente.`) }
-    catch (error) { alert(error.response?.data?.detail || `No se pudo eliminar el registro (HTTP ${error.response?.status || 'desconocido'}).`) }
+    catch (error) { alert(apiErrorMessage(error, `No se pudo eliminar el registro (HTTP ${error.response?.status || 'desconocido'}).`)) }
   }
 
   return (

@@ -53,7 +53,7 @@ api.interceptors.response.use(
       // Mostrar mensaje amigable
       alert('Sesión expirada o no autorizada. Por favor vuelve a iniciar sesión.')
       // Redirigir a la ruta raíz (ajusta si tu app usa otra ruta de login)
-      window.location.href = '/'
+      window.setTimeout(() => { window.location.href = '/' }, 1500)
     }
     return Promise.reject(error)
   }

@@ -6,6 +6,7 @@ import ModalCheckOut from '../components/hotel/ModalCheckOut'
 import ModalProcesarReserva from '../components/reservas/ModalProcesarReserva'
 import Spinner from '../components/ui/Spinner'
 import api from '../api/axiosConfig' 
+import { confirmDialog } from '../utils/dialogs'
 
 export default function Hotel() {
   const { habitaciones, isLoading, refetch, cambiarEstado } = useHabitaciones()
@@ -18,7 +19,7 @@ export default function Hotel() {
 
   // Nueva función para consumir el endpoint de limpieza que tienes en Django
   const handleTerminarLimpieza = async (habitacionId, numeroHabitacion) => {
-    const confirmar = window.confirm(
+    const confirmar = await confirmDialog(
       `¿Confirmas que la Habitación #${numeroHabitacion} ya está limpia y lista para volver a estar disponible?`
     );
     
@@ -38,7 +39,7 @@ export default function Hotel() {
   const handleRequestMaintenance = async (hab) => {
     const enMantenimiento = hab.estado_ocupacion === 'MANTENIMIENTO';
     const accion = enMantenimiento ? 'habilitar' : 'enviar a mantenimiento';
-    if (!window.confirm(`¿Confirmas ${accion} la Habitación #${hab.numero}?`)) return;
+    if (!(await confirmDialog(`¿Confirmas ${accion} la Habitación #${hab.numero}?`))) return;
 
     try {
       await cambiarEstado({

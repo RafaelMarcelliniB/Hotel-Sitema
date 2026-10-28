@@ -4,6 +4,7 @@ import Button from '../ui/Button'
 import { useAuthStore } from '../../store/authStore'
 import { useCajas } from '../../hooks/useCajas'
 import { useRecados } from '../../hooks/useRecados'
+import { confirmDialog } from '../../utils/dialogs'
 
 export default function TopBar() {
   const user = useAuthStore((state) => state.user)
@@ -121,8 +122,8 @@ export default function TopBar() {
           <Button 
             variant="ghost" 
             size="sm"
-            onClick={() => {
-              if (confirm("¿Estás seguro de que deseas salir del sistema?")) {
+            onClick={async () => {
+              if (await confirmDialog("¿Estás seguro de que deseas salir del sistema?")) {
                 clearSession()
               }
             }}

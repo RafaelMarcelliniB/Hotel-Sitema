@@ -1,5 +1,5 @@
 #define MyAppName "Hotel Venecia"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "Hotel Venecia"
 #define MyAppExeName "Hotel Venecia.exe"
 
@@ -11,7 +11,7 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={localappdata}\Programs\Hotel Venecia
 DefaultGroupName={#MyAppName}
 OutputDir=installer_output
-OutputBaseFilename=HotelVeneciaSetup-1.0.1
+OutputBaseFilename=HotelVeneciaSetup-1.0.2
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=lowest
 Compression=lzma

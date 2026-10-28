@@ -97,6 +97,7 @@ if os.getenv('DESKTOP_MODE', '').lower() in {'1', 'true', 'yes'}:
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
             'NAME': desktop_data_dir / 'hotel.sqlite3',
+            'OPTIONS': {'timeout': 20},
         }
     }
 else:

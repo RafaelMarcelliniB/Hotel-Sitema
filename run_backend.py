@@ -10,7 +10,28 @@ import threading
 from pathlib import Path
 
 from flask import Flask, abort, jsonify, send_file
-from wsgiref.simple_server import make_server
+from socketserver import ThreadingMixIn
+from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
+
+
+class QuietRequestHandler(WSGIRequestHandler):
+    """wsgiref escribe cada petición en sys.stderr, que es None en el .exe sin consola."""
+
+    def log_message(self, format, *args):
+        pass
+
+
+class ThreadedWSGIServer(ThreadingMixIn, WSGIServer):
+    """Atiende cada petición en su propio hilo para que una descarga lenta no congele la app."""
+
+    daemon_threads = True
+
+
+def ensure_standard_streams() -> None:
+    """En el ejecutable sin consola stdout/stderr son None y cualquier print() o logging falla."""
+    for name in ("stdout", "stderr"):
+        if getattr(sys, name) is None:
+            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
 
 
 def application_root() -> Path:
@@ -114,10 +135,14 @@ class DesktopApplication:
 
 
 def start_backend(port: int) -> threading.Thread:
+    ensure_standard_streams()
     application = DesktopApplication(create_app(), load_django_application())
 
     def serve():
-        server = make_server("127.0.0.1", port, application)
+        server = make_server(
+            "127.0.0.1", port, application,
+            server_class=ThreadedWSGIServer, handler_class=QuietRequestHandler,
+        )
         server.serve_forever()
 
     server_thread = threading.Thread(target=serve, daemon=True)

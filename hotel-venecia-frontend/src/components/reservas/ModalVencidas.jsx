@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { procesarDevolucionReserva, retenerGarantiaReserva } from '../../api/reservaApi'
+import { confirmDialog } from '../../utils/dialogs'
 
 export default function ModalVencidas({ isOpen, onClose, reservas = [], loading = false, error = null, onProcessed }) {
   const [expandedId, setExpandedId] = useState(null)
@@ -16,7 +17,7 @@ export default function ModalVencidas({ isOpen, onClose, reservas = [], loading 
     const message = action === 'refund'
       ? '¿Confirmar devolución de la garantía en caja?'
       : '¿Retener la garantía como penalidad y liberar la habitación?'
-    if (!window.confirm(message)) return
+    if (!(await confirmDialog(message))) return
     setProcessingId(reserva.id)
     try {
       if (action === 'refund') await procesarDevolucionReserva(reserva.id)

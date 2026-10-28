@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useReservasPorHabitacion } from '../../hooks/useReservas'
+import { confirmDialog } from '../../utils/dialogs'
 
 const splitNombreCompleto = (valor) => {
   const raw = String(valor || '').trim()
@@ -20,8 +21,8 @@ export default function ModalProcesarReserva({ habitacion, isOpen, onClose, onOp
 
   if (!isOpen) return null
 
-  const handleProcesar = (reserva) => {
-    if (!window.confirm(`Abrir formulario de Check-in para ${reserva.huesped?.nombre || 'Huésped'} en Hab ${habitacion.numero}?`)) return
+  const handleProcesar = async (reserva) => {
+    if (!(await confirmDialog(`Abrir formulario de Check-in para ${reserva.huesped?.nombre || 'Huésped'} en Hab ${habitacion.numero}?`))) return
     setProcessingId(reserva.id)
     const nombreBase = reserva.huesped?.nombre || reserva.huesped || ''
     const { nombre, apellido } = splitNombreCompleto(nombreBase)

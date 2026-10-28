@@ -42,13 +42,36 @@ def main() -> None:
     import webview
 
     class DesktopApi:
-        def save_download(self, filename: str, content_base64: str) -> str:
-            downloads_dir = Path.home() / "Downloads" / "Hotel Venecia"
-            downloads_dir.mkdir(parents=True, exist_ok=True)
-            safe_name = Path(filename).name
-            output_path = downloads_dir / safe_name
+        def save_download(self, filename: str, content_base64: str) -> dict:
+            """Ask where to save the file and write it. Returns {"path": str | None}."""
+            safe_name = Path(filename).name or "descarga"
+            downloads_dir = Path.home() / "Downloads"
+            if not downloads_dir.is_dir():
+                downloads_dir = Path.home()
+
+            output_path = None
+            try:
+                window = webview.windows[0]
+                chosen = window.create_file_dialog(
+                    webview.SAVE_DIALOG,
+                    directory=str(downloads_dir),
+                    save_filename=safe_name,
+                )
+                if not chosen:
+                    return {"path": None}
+                output_path = Path(chosen[0] if isinstance(chosen, (list, tuple)) else chosen)
+            except Exception:
+                # Sin diálogo disponible: guardar en Descargas sin pisar archivos existentes.
+                target_dir = downloads_dir / "Hotel Venecia"
+                target_dir.mkdir(parents=True, exist_ok=True)
+                output_path = target_dir / safe_name
+                counter = 1
+                while output_path.exists():
+                    output_path = target_dir / f"{Path(safe_name).stem} ({counter}){Path(safe_name).suffix}"
+                    counter += 1
+
             output_path.write_bytes(base64.b64decode(content_base64))
-            return str(output_path)
+            return {"path": str(output_path)}
 
     port = find_free_port()
     url = f"http://127.0.0.1:{port}"
@@ -64,6 +87,7 @@ def main() -> None:
             min_size=(960, 640),
             js_api=DesktopApi(),
         )
+        webview.settings["ALLOW_DOWNLOADS"] = True
         webview.start()
     finally:
         # El backend vive en el mismo proceso; al cerrar la ventana se finaliza la app.

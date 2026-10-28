@@ -1,5 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_submodules
+import os
+import sys
+
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+
+# collect_submodules importa los paquetes: Hotel/ debe estar en sys.path ANTES de llamarlo,
+# si no, las apps de Django (users, hotel, caja...) no quedan dentro del .exe.
+HOTEL_DIR = os.path.join(SPECPATH, 'Hotel')
+sys.path.insert(0, HOTEL_DIR)
 
 hiddenimports = ['config', 'config.settings', 'config.wsgi']
 hiddenimports += collect_submodules('config')
@@ -16,12 +24,16 @@ hiddenimports += collect_submodules('rest_framework_simplejwt')
 hiddenimports += collect_submodules('corsheaders')
 hiddenimports += collect_submodules('django_filters')
 
+# Traducciones y plantillas de las librerías (mensajes de error en español, etc.).
+extra_datas = []
+for package in ('django', 'rest_framework', 'rest_framework_simplejwt', 'django_filters', 'corsheaders'):
+    extra_datas += collect_data_files(package)
 
 a = Analysis(
     ['main.py'],
-    pathex=['Hotel'],
+    pathex=[HOTEL_DIR],
     binaries=[],
-    datas=[('frontend_build', 'frontend_build')],
+    datas=[(os.path.join(SPECPATH, 'frontend_build'), 'frontend_build')] + extra_datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

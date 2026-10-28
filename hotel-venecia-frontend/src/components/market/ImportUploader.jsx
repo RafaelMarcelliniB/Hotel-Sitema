@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import api from '../../api/axiosConfig'
+import { saveBlobAsFile } from '../../utils/downloadFile'
 
 /**
  * ImportUploader
@@ -32,29 +33,12 @@ export default function ImportUploader({ onDone }) {
       const resp = await api.get(`/market/productos/plantilla/${format}/`, { responseType: 'blob' })
       const contentType = resp.headers['content-type'] || (format === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'text/csv;charset=utf-8')
       const blob = new Blob([resp.data], { type: contentType })
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
       const disposition = resp.headers['content-disposition'] || ''
       const serverName = disposition.match(/filename="?([^";]+)"?/i)?.[1]
       const filename = serverName || (format === 'xlsx' ? 'plantilla_productos.xlsx' : 'plantilla_productos.csv')
-      if (window.pywebview?.api?.save_download) {
-        const buffer = await resp.data.arrayBuffer()
-        let binary = ''
-        new Uint8Array(buffer).forEach((byte) => { binary += String.fromCharCode(byte) })
-        const path = await window.pywebview.api.save_download(filename, btoa(binary))
-        setOpen(false)
-        setDownloadMessage(`Guardada en: ${path}`)
-        return
-      }
-      a.download = filename
-      a.style.display = 'none'
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      window.URL.revokeObjectURL(url)
+      const savedPath = await saveBlobAsFile(blob, filename)
       setOpen(false)
-      setDownloadMessage(`Descargada: ${a.download}`)
+      setDownloadMessage(savedPath ? `Guardada: ${savedPath}` : 'Descarga cancelada.')
     } catch (e) {
       console.error('Error al descargar plantilla', e)
       const status = e.response?.status ? ` (${e.response.status})` : ''

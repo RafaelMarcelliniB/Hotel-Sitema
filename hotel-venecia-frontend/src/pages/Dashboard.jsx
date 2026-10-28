@@ -10,6 +10,7 @@ import { useTrabajadores } from '../hooks/useTrabajadores'
 import { Button } from '../components/ui/Button'
 import { useAuthStore } from '../store/authStore'
 import { downloadReporteVentas } from '../api/reportesApi'
+import { saveBlobAsFile } from '../utils/downloadFile'
 
 const TURNOS = [
   { value: 'mañana', label: 'Mañana' },
@@ -102,14 +103,7 @@ export default function Dashboard() {
         }
       }
 
-      const url = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.setAttribute('download', fileName)
-      document.body.appendChild(link)
-      link.click()
-      link.parentNode.removeChild(link)
-      window.URL.revokeObjectURL(url)
+      await saveBlobAsFile(blob, fileName)
     } catch (err) {
       console.error(err)
       alert('Error al generar el reporte.')

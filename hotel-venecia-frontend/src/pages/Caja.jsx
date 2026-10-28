@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useCajas } from '../hooks/useCajas'
 import { downloadCajaReporte } from '../api/reportesApi'
+import { saveBlobAsFile } from '../utils/downloadFile'
 import api from '../api/axiosConfig'
 import { Modal } from '../components/ui/Modal'
 import Button from '../components/ui/Button'
@@ -153,21 +154,7 @@ export default function Caja() {
                 setIsDownloading(true)
                 const { blob, headers } = await downloadCajaReporte(resumen.caja.id)
                 const fileName = getFileNameFromContentDisposition(headers?.['content-disposition']) || `reporte_caja_${resumen.caja.id}.xlsx`
-                if (window.pywebview?.api?.save_download) {
-                  const buffer = await blob.arrayBuffer()
-                  let binary = ''
-                  new Uint8Array(buffer).forEach((byte) => { binary += String.fromCharCode(byte) })
-                  await window.pywebview.api.save_download(fileName, btoa(binary))
-                  return
-                }
-                const url = window.URL.createObjectURL(new Blob([blob]))
-                const link = document.createElement('a')
-                link.href = url
-                link.setAttribute('download', fileName)
-                document.body.appendChild(link)
-                link.click()
-                link.parentNode.removeChild(link)
-                window.URL.revokeObjectURL(url)
+                await saveBlobAsFile(blob, fileName)
               } catch (err) {
                 console.error(err)
                 alert('Error al generar el reporte.')
