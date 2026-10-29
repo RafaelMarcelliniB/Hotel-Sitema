@@ -46,7 +46,7 @@ export default function Dashboard() {
   const isRecepcionista = user?.rol === 'recepcionista'
   const isAdmin = user?.rol === 'admin'
   const { data, isLoading, isError, refetch } = useDashboard()
-  const { trabajadores, isLoading: loadingTrabajadores } = useTrabajadores()
+  const { trabajadores, isLoading: loadingTrabajadores } = useTrabajadores({ enabled: isAdmin })
 
   const [periodo, setPeriodo] = useState('hoy')
   const [fechaInicio, setFechaInicio] = useState('')

@@ -58,7 +58,7 @@ export default function ModalCierreCaja({ open, onClose, onSubmit, montoEsperado
           </div>
         )}
         <div className="flex justify-end gap-2 pt-1">
-          <Button type="button" onClick={onClose} className="bg-slate-200 text-slate-700">Cancelar</Button>
+          <Button type="button" variant="neutral" onClick={onClose}>Cancelar</Button>
           <Button type="submit" disabled={isSaving}>{isSaving ? 'Cerrando...' : 'Cerrar Caja'}</Button>
         </div>
       </form>

@@ -1,12 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getTrabajadores, registrarTrabajador, actualizarTrabajador } from '../api/authApi'
 
-export function useTrabajadores() {
+export function useTrabajadores({ enabled = true } = {}) {
   const queryClient = useQueryClient()
 
   const query = useQuery({
     queryKey: ['trabajadores'],
-    queryFn: getTrabajadores
+    queryFn: getTrabajadores,
+    enabled
   })
 
   const crearMutation = useMutation({

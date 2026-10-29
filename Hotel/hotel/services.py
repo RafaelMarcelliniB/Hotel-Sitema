@@ -228,7 +228,7 @@ class CheckInService(BaseService):
             monto=data['monto'],
             fecha=timezone.localdate(),
             hora=timezone.localtime().time(),
-            worker=trabajador,
+            trabajador=trabajador,
         )
 
     def obtener_resumen(self, checkin):

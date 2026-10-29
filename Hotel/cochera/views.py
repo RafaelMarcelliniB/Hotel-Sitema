@@ -124,7 +124,10 @@ class RegistroVehiculoIngresoView(APIView):
             return Response({'detail': 'Permisos insuficientes.'}, status=status.HTTP_403_FORBIDDEN)
         serializer = RegistroVehiculoIngresoSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        registro = RegistroVehiculoService().registrar_ingreso(serializer.validated_data, request.user)
+        try:
+            registro = RegistroVehiculoService().registrar_ingreso(serializer.validated_data, request.user)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(_serializar_registro(registro), status=status.HTTP_201_CREATED)
 
 
@@ -158,7 +161,10 @@ class RegistroVehiculoSalidaView(APIView):
             )
 
         # Procesamos la salida para clientes públicos
-        registro = RegistroVehiculoService().registrar_salida(registro_id)
+        try:
+            registro = RegistroVehiculoService().registrar_salida(registro_id)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         metodo = request.data.get('metodo_pago', MovimientoCaja.TipoCaja.EFECTIVO)
 
         caja_activa = Caja.objects.filter(

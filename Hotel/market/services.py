@@ -22,7 +22,6 @@ class IngresoMercaderiaService(BaseService):
         producto = producto_repo.get_by_id(ingreso_data['producto_id'])
         ingreso = self.repository.create(
             producto=producto,
-            amount=ingreso_data['cantidad'],  # Nota: Verifica si tu repo usa 'cantidad' o el campo del modelo
             cantidad=ingreso_data['cantidad'],
             precio_compra=ingreso_data['precio_compra'],
             proveedor=ingreso_data['proveedor'],

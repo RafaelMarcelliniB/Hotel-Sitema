@@ -4,6 +4,7 @@ export function Button({ as: Component = 'button', variant = 'primary', classNam
     secondary: 'bg-secondary text-slate-900 hover:bg-yellow-500',
     ghost: 'bg-transparent text-slate-700 hover:bg-slate-100',
     danger: 'bg-danger text-white hover:opacity-90',
+    neutral: 'bg-slate-200 text-slate-700 hover:bg-slate-300',
   }
 
   // Si es un elemento de tipo 'button', le aseguramos que tenga un type válido heredado de los props o 'button' por defecto

@@ -1,3 +1,4 @@
+from django.db.models.deletion import ProtectedError
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
@@ -71,6 +72,15 @@ class TrabajadorViewSet(viewsets.ModelViewSet):
 		)
 		instance.delete()
 
+	def destroy(self, request, *args, **kwargs):
+		try:
+			return super().destroy(request, *args, **kwargs)
+		except ProtectedError:
+			return Response(
+				{'detail': 'No se puede eliminar este usuario porque tiene cajas o registros asociados. Desactívelo en su lugar.'},
+				status=status.HTTP_409_CONFLICT,
+			)
+
 	@action(detail=True, methods=['post'], url_path='cambiar-password')
 	def cambiar_password(self, request, pk=None):
 		trabajador = self.get_object()
@@ -90,6 +100,8 @@ class TrabajadorViewSet(viewsets.ModelViewSet):
 	@action(detail=True, methods=['patch'], url_path='toggle-activo')
 	def toggle_activo(self, request, pk=None):
 		trabajador = self.get_object()
+		if trabajador.pk == request.user.pk and trabajador.activo:
+			return Response({'detail': 'No puedes desactivar tu propia cuenta.'}, status=status.HTTP_400_BAD_REQUEST)
 		trabajador.activo = not trabajador.activo
 		trabajador.save(update_fields=['activo'])
 		AuditLog.objects.create(

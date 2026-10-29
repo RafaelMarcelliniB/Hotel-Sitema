@@ -147,14 +147,17 @@ class ProductoViewSet(viewsets.ModelViewSet):
 		if producto_id is None:
 			raise ValueError('Debe indicar el producto a transferir.')
 
-		transferencia = StockTransferService().transferir_stock(
-			producto_id=producto_id,
-			origen=data['origen'],
-			destino=data['destino'],
-			cantidad=data['cantidad'],
-			trabajador=request.user,
-			motivo=data.get('motivo', ''),
-		)
+		try:
+			transferencia = StockTransferService().transferir_stock(
+				producto_id=producto_id,
+				origen=data['origen'],
+				destino=data['destino'],
+				cantidad=data['cantidad'],
+				trabajador=request.user,
+				motivo=data.get('motivo', ''),
+			)
+		except ValueError as exc:
+			return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
 		return Response(StockTransferSerializer(transferencia).data, status=status.HTTP_200_OK)
 

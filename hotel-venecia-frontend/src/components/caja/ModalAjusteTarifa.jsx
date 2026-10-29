@@ -71,7 +71,7 @@ export default function ModalAjusteTarifa({ open, onClose, onSubmit, defaultChec
           </Select>
         </div>
         <div className="flex justify-end gap-2 pt-2">
-          <Button type="button" onClick={onClose} className="bg-slate-200 text-slate-700">Cancelar</Button>
+          <Button type="button" variant="neutral" onClick={onClose}>Cancelar</Button>
           <Button type="submit" disabled={!checkinId || loadingCheckins}>Aplicar Ajuste</Button>
         </div>
       </form>

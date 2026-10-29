@@ -236,13 +236,13 @@ export default function Caja() {
                     <td className="px-4 py-3">
                       <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${
                         mov.tipo === 'INGRESO' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                      }`}>\
+                      }`}>
                         {mov.tipo}
                       </span>
                     </td>
                     <td className={`px-4 py-3 text-right font-bold ${
                       mov.tipo === 'INGRESO' ? 'text-green-600' : 'text-red-600'
-                    }`}>\
+                    }`}>
                       {mov.tipo === 'INGRESO' ? '+' : '-'} S/ {Number(mov.monto).toFixed(2)}
                     </td>
                     <td className="px-4 py-3 text-right">

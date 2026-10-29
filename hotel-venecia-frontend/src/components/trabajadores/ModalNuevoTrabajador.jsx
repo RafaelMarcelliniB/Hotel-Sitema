@@ -9,7 +9,7 @@ import { globalValidations } from '../../utils/validations'
 
 export default function ModalNuevoTrabajador({ onClose, initialData = null, id = null }) {
   const { crearTrabajador, editarTrabajador } = useTrabajadores()
-  const { register, handleSubmit, formState: { errors }, reset } = useForm({ defaultValues: initialData || {} })
+  const { register, handleSubmit, formState: { errors }, reset } = useForm({ defaultValues: initialData || { activo: true } })
 
   // Si cambian los datos iniciales (modo edición), reiniciamos el formulario
   useEffect(() => {
